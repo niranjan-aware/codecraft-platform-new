@@ -1,64 +1,57 @@
 package com.codecraft.project.entity;
 
 import jakarta.persistence.*;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
+import lombok.*;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
 @Table(name = "projects")
-@Data
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class Project {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
+    @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
 
-    @Column(nullable = false)
-    private UUID userId;
+    @Column(name = "user_id", nullable = false)
+    private String userId;  // Back to String!
 
     @Column(nullable = false)
     private String name;
 
-    @Column(length = 1000)
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Language language;
 
-    @Enumerated(EnumType.STRING)
-    private Framework framework;
+    private String framework;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Visibility visibility = Visibility.PRIVATE;
 
+    @Column(name = "github_url")
     private String githubUrl;
 
-    @CreationTimestamp
-    @Column(updatable = false)
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    @UpdateTimestamp
+    @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 
     public enum Language {
         NODEJS, PYTHON, JAVA, HTML_CSS_JS
     }
 
-    public enum Framework {
-        EXPRESS, REACT, NEXTJS, FLASK, DJANGO, SPRING_BOOT, NONE
-    }
-
     public enum Visibility {
-        PUBLIC, PRIVATE
+        PRIVATE, PUBLIC
     }
 }

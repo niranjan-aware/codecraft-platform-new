@@ -42,18 +42,18 @@ export const fileAPI = {
     api.get(`/projects/${projectId}/files/tree`),
 
   get: (projectId: string, path: string) =>
-    api.get(`/projects/${projectId}/files/**`, {
+    api.get(`/projects/${projectId}/files`, {
       headers: { 'X-File-Path': path }
     }),
 
   update: (projectId: string, path: string, content: string) =>
-    api.put(`/projects/${projectId}/files/**`,
+    api.put(`/projects/${projectId}/files`,
       { path, content },
       { headers: { 'X-File-Path': path } }
     ),
 
   delete: (projectId: string, path: string) =>
-    api.delete(`/projects/${projectId}/files/**`, {
+    api.delete(`/projects/${projectId}/files`, {
       headers: { 'X-File-Path': path }
     })
 };

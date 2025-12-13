@@ -21,7 +21,7 @@ public class FileService {
     private final StorageService storageService;
 
     @Transactional
-    public FileResponse createFile(UUID projectId, FileRequest request, UUID userId) {
+    public FileResponse createFile(String userId, UUID projectId, FileRequest request) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 
@@ -49,7 +49,7 @@ public class FileService {
     }
 
     @Transactional
-    public FileResponse updateFile(UUID projectId, String path, FileRequest request, UUID userId) {
+    public FileResponse updateFile(String userId, UUID projectId, String path, String content) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 
@@ -60,24 +60,17 @@ public class FileService {
         ProjectFile file = fileRepository.findByProjectIdAndPath(projectId, path)
                 .orElseThrow(() -> new RuntimeException("File not found"));
 
-        String minioKey = storageService.uploadFile(projectId, request.getPath(), request.getContent());
+        String minioKey = storageService.uploadFile(projectId, path, content);
 
         file.setMinioKey(minioKey);
-        file.setSizeBytes((long) request.getContent().getBytes().length);
+        file.setSizeBytes((long) content.getBytes().length);
 
         file = fileRepository.save(file);
 
         return mapToResponse(file);
     }
 
-    public FileContentResponse getFile(UUID projectId, String path, UUID userId) {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
-
-        if (!project.getUserId().equals(userId) && project.getVisibility() == Project.Visibility.PRIVATE) {
-            throw new RuntimeException("Unauthorized");
-        }
-
+    public FileContentResponse getFile(UUID projectId, String path) {
         ProjectFile file = fileRepository.findByProjectIdAndPath(projectId, path)
                 .orElseThrow(() -> new RuntimeException("File not found"));
 
@@ -86,26 +79,23 @@ public class FileService {
         return new FileContentResponse(mapToResponse(file), content);
     }
 
-    public List<FileResponse> listFiles(UUID projectId, UUID userId) {
-        Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
+    public FileContentResponse getFileWithContent(UUID projectId, String path) {
+        return getFile(projectId, path);
+    }
 
-        if (!project.getUserId().equals(userId) && project.getVisibility() == Project.Visibility.PRIVATE) {
-            throw new RuntimeException("Unauthorized");
-        }
-
+    public List<FileResponse> listFiles(UUID projectId) {
         return fileRepository.findByProjectId(projectId).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    public FileTreeNode getFileTree(UUID projectId, UUID userId) {
-        List<FileResponse> files = listFiles(projectId, userId);
+    public FileTreeNode getFileTree(UUID projectId) {
+        List<FileResponse> files = listFiles(projectId);
         return buildFileTree(files);
     }
 
     @Transactional
-    public void deleteFile(UUID projectId, String path, UUID userId) {
+    public void deleteFile(String userId, UUID projectId, String path) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 

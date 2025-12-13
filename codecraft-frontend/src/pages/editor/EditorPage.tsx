@@ -38,11 +38,9 @@ const EditorPage: React.FC = () => {
     try {
       const response = await fileAPI.getTree(projectId!);
       const data = response.data;
-      // Ensure we always have an array
       if (Array.isArray(data)) {
         setFileTree(data);
       } else if (data && typeof data === 'object') {
-        // If it's an object, convert to array
         setFileTree([data]);
       } else {
         setFileTree([]);
@@ -57,7 +55,8 @@ const EditorPage: React.FC = () => {
     try {
       const response = await fileAPI.get(projectId!, path);
       setCurrentFile(path);
-      setFileContent(response.data.content);
+      // Response is { file: {...}, content: "..." }
+      setFileContent(response.data.content || '');
       
       const ext = path.split('.').pop();
       const langMap: { [key: string]: string } = {
@@ -94,7 +93,21 @@ const EditorPage: React.FC = () => {
     if (!fileName) return;
     
     try {
-      await fileAPI.create(projectId!, { path: fileName, content: '' });
+      const ext = fileName.split('.').pop() || '';
+      const defaultContent: { [key: string]: string } = {
+        'js': '// TODO: Add JavaScript code\nconsole.log("Hello World");\n',
+        'ts': '// TODO: Add TypeScript code\nconsole.log("Hello World");\n',
+        'py': '# TODO: Add Python code\nprint("Hello World")\n',
+        'java': '// TODO: Add Java code\npublic class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello World");\n  }\n}\n',
+        'html': '<!DOCTYPE html>\n<html>\n<head>\n  <title>Document</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n',
+        'css': '/* Add your styles here */\nbody {\n  font-family: sans-serif;\n}\n',
+        'json': '{\n  "name": "project"\n}\n',
+        'md': '# Document\n\nHello World\n'
+      };
+      
+      const content = defaultContent[ext] || '// TODO: Add content\n';
+      
+      await fileAPI.create(projectId!, { path: fileName, content });
       await loadFileTree();
     } catch (error) {
       console.error('Failed to create file', error);

@@ -1,21 +1,31 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectAPI } from '../../services/api';
+import { projectAPI, fileAPI } from '../../services/api';
 import { Project } from '../../types';
-import { Plus, FolderOpen, Calendar, Code } from 'lucide-react';
-import { projectTemplates } from '../../templates';
+import { Plus, FolderOpen, Calendar, Code, Bell } from 'lucide-react';
+import { projectTemplates, getTemplate } from '../../templates';
 
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [newProject, setNewProject] = useState({
     name: '',
     description: '',
-    language: 'javascript',
+    language: 'NODEJS',
     template: ''
   });
+
+  // Map frontend language to backend enum
+  const languageMap: { [key: string]: string } = {
+    'javascript': 'NODEJS',
+    'typescript': 'NODEJS', 
+    'python': 'PYTHON',
+    'java': 'JAVA',
+    'html': 'HTML_CSS_JS'
+  };
 
   useEffect(() => {
     loadProjects();
@@ -33,17 +43,48 @@ const DashboardPage: React.FC = () => {
   };
 
   const handleCreateProject = async () => {
+    if (!newProject.name) return;
+    
+    setCreating(true);
     try {
-      const response = await projectAPI.create(newProject);
-      navigate(`/editor/${response.data.id}`);
-    } catch (error) {
+      const projectData = {
+        name: newProject.name,
+        description: newProject.description,
+        language: newProject.language
+      };
+      
+      const response = await projectAPI.create(projectData);
+      const projectId = response.data.id;
+      
+      if (newProject.template) {
+        const template = getTemplate(newProject.template);
+        if (template && template.files) {
+          for (const file of template.files) {
+            try {
+              await fileAPI.create(projectId, {
+                path: file.path,
+                content: file.content || '// TODO: Add content'
+              });
+              await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (err) {
+              console.error(`Failed to create file ${file.path}`, err);
+            }
+          }
+        }
+      }
+      
+      navigate(`/editor/${projectId}`);
+    } catch (error: any) {
       console.error('Failed to create project', error);
-      alert('Failed to create project');
+      alert(error.response?.data?.message || 'Failed to create project');
+    } finally {
+      setCreating(false);
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     navigate('/login');
   };
 
@@ -57,20 +98,25 @@ const DashboardPage: React.FC = () => {
         justifyContent: 'space-between',
         alignItems: 'center'
       }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem' }}>CodeCraft</h1>
-        <button
-          onClick={handleLogout}
-          style={{
-            padding: '0.5rem 1rem',
-            background: '#f44336',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Logout
-        </button>
+        <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#2196F3' }}>
+          <Code size={24} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+          CodeCraft
+        </h1>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '0.5rem 1rem',
+              background: '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </nav>
 
       <div style={{ padding: '2rem' }}>
@@ -93,7 +139,8 @@ const DashboardPage: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              fontSize: '1rem'
+              fontSize: '1rem',
+              fontWeight: 500
             }}
           >
             <Plus size={20} />
@@ -102,7 +149,17 @@ const DashboardPage: React.FC = () => {
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '3rem' }}>Loading...</div>
+          <div style={{ textAlign: 'center', padding: '3rem' }}>
+            <div style={{ 
+              border: '4px solid #f3f3f3',
+              borderTop: '4px solid #2196F3',
+              borderRadius: '50%',
+              width: '40px',
+              height: '40px',
+              animation: 'spin 1s linear infinite',
+              margin: '0 auto'
+            }} />
+          </div>
         ) : projects.length === 0 ? (
           <div style={{ 
             textAlign: 'center', 
@@ -130,7 +187,7 @@ const DashboardPage: React.FC = () => {
                   borderRadius: '8px',
                   boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
                   cursor: 'pointer',
-                  transition: 'transform 0.2s, box-shadow 0.2s'
+                  transition: 'all 0.2s'
                 }}
                 onMouseOver={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
@@ -151,7 +208,8 @@ const DashboardPage: React.FC = () => {
                     padding: '0.25rem 0.5rem', 
                     background: '#e3f2fd', 
                     borderRadius: '4px',
-                    color: '#1976d2'
+                    color: '#1976d2',
+                    fontWeight: 500
                   }}>
                     {project.language}
                   </span>
@@ -184,13 +242,15 @@ const DashboardPage: React.FC = () => {
             padding: '2rem',
             borderRadius: '8px',
             width: '90%',
-            maxWidth: '500px'
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            overflow: 'auto'
           }}>
             <h2 style={{ marginTop: 0 }}>Create New Project</h2>
             
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                Project Name
+                Project Name *
               </label>
               <input
                 type="text"
@@ -235,10 +295,11 @@ const DashboardPage: React.FC = () => {
                 value={newProject.template}
                 onChange={(e) => {
                   const template = projectTemplates.find(t => t.id === e.target.value);
+                  const templateLanguage = template?.language || 'javascript';
                   setNewProject({ 
                     ...newProject, 
                     template: e.target.value,
-                    language: template?.language || 'javascript'
+                    language: languageMap[templateLanguage] || 'NODEJS'
                   });
                 }}
                 style={{
@@ -260,14 +321,18 @@ const DashboardPage: React.FC = () => {
 
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setNewProject({ name: '', description: '', language: 'NODEJS', template: '' });
+                }}
+                disabled={creating}
                 style={{
                   padding: '0.75rem 1.5rem',
                   background: '#fff',
                   color: '#666',
                   border: '1px solid #ddd',
                   borderRadius: '4px',
-                  cursor: 'pointer',
+                  cursor: creating ? 'not-allowed' : 'pointer',
                   fontSize: '1rem'
                 }}
               >
@@ -275,23 +340,30 @@ const DashboardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleCreateProject}
-                disabled={!newProject.name}
+                disabled={!newProject.name || creating}
                 style={{
                   padding: '0.75rem 1.5rem',
-                  background: newProject.name ? '#2196F3' : '#ccc',
+                  background: (!newProject.name || creating) ? '#ccc' : '#2196F3',
                   color: 'white',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: newProject.name ? 'pointer' : 'not-allowed',
+                  cursor: (!newProject.name || creating) ? 'not-allowed' : 'pointer',
                   fontSize: '1rem'
                 }}
               >
-                Create Project
+                {creating ? 'Creating...' : 'Create Project'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };
