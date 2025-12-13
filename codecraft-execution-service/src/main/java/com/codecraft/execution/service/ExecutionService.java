@@ -1,0 +1,294 @@
+package com.codecraft.execution.service;
+
+import com.codecraft.execution.dto.ExecutionRequest;
+import com.codecraft.execution.dto.ExecutionResponse;
+import com.codecraft.execution.dto.LogMessage;
+import com.codecraft.execution.entity.Execution;
+import com.codecraft.execution.entity.ExecutionLog;
+import com.codecraft.execution.repository.ExecutionLogRepository;
+import com.codecraft.execution.repository.ExecutionRepository;
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.model.Frame;
+import com.github.dockerjava.core.command.ExecStartResultCallback;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ExecutionService {
+
+    private final ExecutionRepository executionRepository;
+    private final ExecutionLogRepository logRepository;
+    private final DockerService dockerService;
+    private final StorageService storageService;
+    private final SimpMessagingTemplate messagingTemplate;
+    private final DockerClient dockerClient;
+
+    @Transactional
+    public ExecutionResponse startExecution(ExecutionRequest request, UUID userId) {
+        Execution execution = new Execution();
+        execution.setProjectId(request.getProjectId());
+        execution.setUserId(userId);
+        execution.setLanguage(request.getLanguage());
+        execution.setStatus(Execution.ExecutionStatus.PENDING);
+        
+        execution = executionRepository.save(execution);
+
+        executeAsync(execution.getId());
+
+        return mapToResponse(execution);
+    }
+
+    @Async
+    public void executeAsync(UUID executionId) {
+        Execution execution = executionRepository.findById(executionId)
+            .orElseThrow(() -> new RuntimeException("Execution not found"));
+
+        String containerId = null;
+        String workingDir = null;
+
+        try {
+            execution.setStatus(Execution.ExecutionStatus.RUNNING);
+            execution.setStartedAt(LocalDateTime.now());
+            executionRepository.save(execution);
+
+            sendLog(execution.getId(), "INFO", "Starting execution...");
+
+            workingDir = storageService.downloadProjectFiles(execution.getProjectId());
+            sendLog(execution.getId(), "INFO", "Project files downloaded to: " + workingDir);
+
+            Map<String, String> env = new HashMap<>();
+            env.put("NODE_ENV", "production");
+            env.put("PYTHONUNBUFFERED", "1");
+
+            containerId = dockerService.createContainer(
+                execution.getLanguage(),
+                workingDir,
+                env
+            );
+            
+            execution.setContainerId(containerId);
+            executionRepository.save(execution);
+
+            dockerService.startContainer(containerId);
+            sendLog(execution.getId(), "INFO", "Container started: " + containerId);
+
+            executeLanguageSpecificCommands(execution, containerId);
+
+            Thread.sleep(5000);
+
+            boolean isRunning = dockerService.isContainerRunning(containerId);
+            Integer exitCode = dockerService.getExitCode(containerId);
+            
+            execution.setExitCode(exitCode);
+            
+            if (exitCode != null && exitCode == 0) {
+                execution.setStatus(Execution.ExecutionStatus.SUCCESS);
+                sendLog(execution.getId(), "INFO", "Execution completed successfully");
+            } else {
+                execution.setStatus(Execution.ExecutionStatus.FAILED);
+                sendLog(execution.getId(), "ERROR", "Execution failed with exit code: " + exitCode);
+            }
+
+        } catch (Exception e) {
+            log.error("Execution failed", e);
+            execution.setStatus(Execution.ExecutionStatus.FAILED);
+            execution.setErrorMessage(e.getMessage());
+            sendLog(execution.getId(), "ERROR", "Execution error: " + e.getMessage());
+        } finally {
+            execution.setCompletedAt(LocalDateTime.now());
+            executionRepository.save(execution);
+
+            if (containerId != null) {
+                try {
+                    Thread.sleep(2000);
+                    dockerService.stopContainer(containerId);
+                    dockerService.removeContainer(containerId);
+                    sendLog(execution.getId(), "INFO", "Container cleaned up");
+                } catch (Exception e) {
+                    log.error("Failed to cleanup container", e);
+                }
+            }
+
+            if (workingDir != null) {
+                storageService.cleanupProjectFiles(execution.getProjectId());
+            }
+        }
+    }
+
+    private void executeLanguageSpecificCommands(Execution execution, String containerId) {
+        try {
+            switch (execution.getLanguage()) {
+                case NODEJS -> executeNodeJs(execution, containerId);
+                case PYTHON -> executePython(execution, containerId);
+                case JAVA -> executeJava(execution, containerId);
+                case HTML_CSS_JS -> executeHtmlCssJs(execution, containerId);
+            }
+        } catch (Exception e) {
+            log.error("Failed to execute commands", e);
+            sendLog(execution.getId(), "ERROR", "Command execution failed: " + e.getMessage());
+        }
+    }
+
+    private void executeNodeJs(Execution execution, String containerId) throws Exception {
+        sendLog(execution.getId(), "INFO", "Checking for package.json...");
+        
+        executeCommand(execution, containerId, 
+            new String[]{"sh", "-c", "if [ -f package.json ]; then echo 'Found package.json'; else echo 'No package.json found'; fi"});
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "if [ -f package.json ]; then npm install; fi"});
+        
+        sendLog(execution.getId(), "INFO", "Running application...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "if [ -f index.js ]; then node index.js; elif [ -f app.js ]; then node app.js; elif [ -f server.js ]; then node server.js; else echo 'No entry point found'; fi"});
+    }
+
+    private void executePython(Execution execution, String containerId) throws Exception {
+        sendLog(execution.getId(), "INFO", "Checking for requirements.txt...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi"});
+        
+        sendLog(execution.getId(), "INFO", "Running application...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "if [ -f main.py ]; then python main.py; elif [ -f app.py ]; then python app.py; else echo 'No entry point found'; fi"});
+    }
+
+    private void executeJava(Execution execution, String containerId) throws Exception {
+        sendLog(execution.getId(), "INFO", "Building Java project...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "if [ -f pom.xml ]; then mvn clean install; elif [ -f build.gradle ]; then gradle build; else echo 'No build file found'; fi"});
+        
+        sendLog(execution.getId(), "INFO", "Running application...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "java -jar target/*.jar || java -jar build/libs/*.jar || echo 'No jar file found'"});
+    }
+
+    private void executeHtmlCssJs(Execution execution, String containerId) throws Exception {
+        sendLog(execution.getId(), "INFO", "Starting HTTP server...");
+        
+        executeCommand(execution, containerId,
+            new String[]{"sh", "-c", "python3 -m http.server 8080 || echo 'Failed to start server'"});
+    }
+
+    private void executeCommand(Execution execution, String containerId, String[] command) throws Exception {
+        ExecCreateCmdResponse execCreateCmd = dockerClient.execCreateCmd(containerId)
+            .withCmd(command)
+            .withAttachStdout(true)
+            .withAttachStderr(true)
+            .exec();
+
+        dockerClient.execStartCmd(execCreateCmd.getId())
+            .exec(new ExecStartResultCallback() {
+                @Override
+                public void onNext(Frame frame) {
+                    String output = new String(frame.getPayload()).trim();
+                    if (!output.isEmpty()) {
+                        String level = frame.getStreamType().name().equals("STDERR") ? "ERROR" : "INFO";
+                        sendLog(execution.getId(), level, output);
+                    }
+                }
+            })
+            .awaitCompletion(60, TimeUnit.SECONDS);
+    }
+
+    private void sendLog(UUID executionId, String level, String message) {
+        ExecutionLog log = new ExecutionLog();
+        log.setExecutionId(executionId);
+        log.setLogLevel(ExecutionLog.LogLevel.valueOf(level));
+        log.setMessage(message);
+        logRepository.save(log);
+
+        LogMessage logMessage = new LogMessage(level, message, LocalDateTime.now());
+        messagingTemplate.convertAndSend("/topic/logs/" + executionId, logMessage);
+    }
+
+    public ExecutionResponse getExecution(UUID executionId, UUID userId) {
+        Execution execution = executionRepository.findById(executionId)
+            .orElseThrow(() -> new RuntimeException("Execution not found"));
+
+        if (!execution.getUserId().equals(userId)) {
+            throw new RuntimeException("Unauthorized");
+        }
+
+        return mapToResponse(execution);
+    }
+
+    public List<ExecutionResponse> getExecutionsByProject(UUID projectId, UUID userId) {
+        return executionRepository.findByProjectId(projectId).stream()
+            .filter(e -> e.getUserId().equals(userId))
+            .map(this::mapToResponse)
+            .toList();
+    }
+
+    @Transactional
+    public void stopExecution(UUID executionId, UUID userId) {
+        Execution execution = executionRepository.findById(executionId)
+            .orElseThrow(() -> new RuntimeException("Execution not found"));
+
+        if (!execution.getUserId().equals(userId)) {
+            throw new RuntimeException("Unauthorized");
+        }
+
+        if (execution.getContainerId() != null) {
+            dockerService.stopContainer(execution.getContainerId());
+            dockerService.removeContainer(execution.getContainerId());
+        }
+
+        execution.setStatus(Execution.ExecutionStatus.STOPPED);
+        execution.setCompletedAt(LocalDateTime.now());
+        executionRepository.save(execution);
+
+        sendLog(executionId, "INFO", "Execution stopped by user");
+    }
+
+    public List<LogMessage> getLogs(UUID executionId, UUID userId) {
+        Execution execution = executionRepository.findById(executionId)
+            .orElseThrow(() -> new RuntimeException("Execution not found"));
+
+        if (!execution.getUserId().equals(userId)) {
+            throw new RuntimeException("Unauthorized");
+        }
+
+        return logRepository.findByExecutionIdOrderByTimestampAsc(executionId).stream()
+            .map(log -> new LogMessage(
+                log.getLogLevel().name(),
+                log.getMessage(),
+                log.getTimestamp()
+            ))
+            .toList();
+    }
+
+    private ExecutionResponse mapToResponse(Execution execution) {
+        return new ExecutionResponse(
+            execution.getId(),
+            execution.getProjectId(),
+            execution.getContainerId(),
+            execution.getStatus(),
+            execution.getLanguage(),
+            execution.getStartedAt(),
+            execution.getCompletedAt(),
+            execution.getCpuUsage(),
+            execution.getMemoryUsage(),
+            execution.getExitCode(),
+            execution.getPort(),
+            execution.getErrorMessage(),
+            execution.getCreatedAt()
+        );
+    }
+}

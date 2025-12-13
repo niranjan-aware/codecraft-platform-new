@@ -1,0 +1,10 @@
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/config/SecurityConfig.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/dto/LoginRequest.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/entity/User.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/repository/UserRepository.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/dto/AuthResponse.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/controller/AuthController.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/service/JwtService.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/dto/RegisterRequest.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/service/AuthService.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-auth-service/src/main/java/com/codecraft/auth/AuthServiceApplication.java

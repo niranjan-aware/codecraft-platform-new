@@ -1,0 +1,57 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: execution-service
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/execution_db
+    username: codecraft_user
+    password: codecraft123
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/
+    register-with-eureka: true
+    fetch-registry: true
+
+docker:
+  host: unix:///var/run/docker.sock
+  tls-verify: false
+
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket-name: codecraft-projects
+
+execution:
+  timeout-seconds: 300
+  max-concurrent: 5
+  container:
+    memory-limit: 512m
+    cpu-limit: 0.5
+    network-disabled: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

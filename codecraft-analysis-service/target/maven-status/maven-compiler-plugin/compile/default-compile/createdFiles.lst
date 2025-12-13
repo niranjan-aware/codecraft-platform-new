@@ -1,0 +1,11 @@
+com/codecraft/analysis/entity/AnalysisReport$AnalysisStatus.class
+com/codecraft/analysis/entity/CodeIssue.class
+com/codecraft/analysis/AnalysisServiceApplication.class
+com/codecraft/analysis/entity/Dependency.class
+com/codecraft/analysis/entity/AnalysisReport$AnalysisType.class
+com/codecraft/analysis/entity/CodeIssue$Severity.class
+com/codecraft/analysis/entity/AnalysisReport.class
+com/codecraft/analysis/entity/ProjectMetrics.class
+com/codecraft/analysis/client/ProjectServiceClient.class
+com/codecraft/analysis/entity/Dependency$DependencyType.class
+com/codecraft/analysis/entity/ProjectMetrics$Rating.class
