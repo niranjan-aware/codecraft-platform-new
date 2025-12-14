@@ -6,23 +6,30 @@ import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
+import java.util.Properties;
 
+@Slf4j
 @Configuration
 public class DockerConfig {
 
-    @Value("${docker.host}")
-    private String dockerHost;
-
     @Bean
     public DockerClient dockerClient() {
+        String dockerHost = "unix:///var/run/docker.sock";
+        log.info("=== CREATING DOCKER CLIENT WITH HOST: {} ===", dockerHost);
+        
+        Properties props = new Properties();
+        props.setProperty("DOCKER_HOST", dockerHost);
+        
         DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withDockerHost(dockerHost)
+                .withProperties(props)
                 .build();
+
+        log.info("=== FINAL DOCKER HOST: {} ===", config.getDockerHost());
 
         DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
@@ -31,6 +38,8 @@ public class DockerConfig {
                 .responseTimeout(Duration.ofSeconds(45))
                 .build();
 
-        return DockerClientImpl.getInstance(config, httpClient);
+        DockerClient client = DockerClientImpl.getInstance(config, httpClient);
+        log.info("=== DOCKER CLIENT CREATED ===");
+        return client;
     }
 }

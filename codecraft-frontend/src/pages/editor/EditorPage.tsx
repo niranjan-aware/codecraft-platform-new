@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { projectAPI, fileAPI } from '../../services/api';
+import { executionService } from '../../services/executionService';
 import { Project, FileNode } from '../../types';
 import Editor from '@monaco-editor/react';
 import FileTree from '../../components/editor/FileTree';
 import Terminal from '../../components/editor/Terminal';
-import { Play, ArrowLeft, Save, BarChart3 } from 'lucide-react';
+import { Play, Square, ArrowLeft, Save, BarChart3 } from 'lucide-react';
 
 const EditorPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -15,6 +16,7 @@ const EditorPage: React.FC = () => {
   const [currentFile, setCurrentFile] = useState<string>('');
   const [fileContent, setFileContent] = useState<string>('');
   const [language, setLanguage] = useState<string>('javascript');
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     if (projectId) {
@@ -23,6 +25,12 @@ const EditorPage: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  useEffect(() => {
+    return () => {
+      executionService.disconnect();
+    };
+  }, []);
 
   const loadProject = async () => {
     try {
@@ -55,7 +63,6 @@ const EditorPage: React.FC = () => {
     try {
       const response = await fileAPI.get(projectId!, path);
       setCurrentFile(path);
-      // Response is { file: {...}, content: "..." }
       setFileContent(response.data.content || '');
       
       const ext = path.split('.').pop();
@@ -81,10 +88,62 @@ const EditorPage: React.FC = () => {
     if (!currentFile) return;
     try {
       await fileAPI.update(projectId!, currentFile, fileContent);
-      alert('File saved successfully!');
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('system', `✓ Saved ${currentFile}\n`);
+      }
     } catch (error) {
       console.error('Failed to save file', error);
-      alert('Failed to save file');
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('stderr', `✗ Failed to save ${currentFile}\n`);
+      }
+    }
+  };
+
+  const handleRun = async () => {
+    if (!project) return;
+    
+    setRunning(true);
+    
+    if ((window as any).addTerminalOutput) {
+      (window as any).addTerminalOutput('system', `\n🚀 Starting execution (${project.language})...\n`);
+    }
+    
+    try {
+      const execution = await executionService.execute(projectId!, project.language);
+      
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('system', `Execution ID: ${execution.id}\n`);
+      }
+      
+      executionService.connectWebSocket(execution.id, (message) => {
+        if ((window as any).addTerminalOutput) {
+          if (message.type === 'OUTPUT') {
+            (window as any).addTerminalOutput('stdout', message.data);
+          } else if (message.type === 'ERROR') {
+            (window as any).addTerminalOutput('stderr', message.data);
+          } else if (message.type === 'COMPLETED') {
+            (window as any).addTerminalOutput('system', '\n✓ Execution completed\n');
+            setRunning(false);
+          } else if (message.type === 'FAILED') {
+            (window as any).addTerminalOutput('stderr', '\n✗ Execution failed\n');
+            setRunning(false);
+          }
+        }
+      });
+    } catch (error: any) {
+      console.error('Failed to execute', error);
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('stderr', `✗ Failed to start execution: ${error.response?.data?.message || error.message}\n`);
+      }
+      setRunning(false);
+    }
+  };
+
+  const handleStop = () => {
+    executionService.disconnect();
+    setRunning(false);
+    if ((window as any).addTerminalOutput) {
+      (window as any).addTerminalOutput('system', '\n⏹ Execution stopped\n');
     }
   };
 
@@ -98,7 +157,7 @@ const EditorPage: React.FC = () => {
         'js': '// TODO: Add JavaScript code\nconsole.log("Hello World");\n',
         'ts': '// TODO: Add TypeScript code\nconsole.log("Hello World");\n',
         'py': '# TODO: Add Python code\nprint("Hello World")\n',
-        'java': '// TODO: Add Java code\npublic class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello World");\n  }\n}\n',
+        'java': 'public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello World");\n  }\n}\n',
         'html': '<!DOCTYPE html>\n<html>\n<head>\n  <title>Document</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n',
         'css': '/* Add your styles here */\nbody {\n  font-family: sans-serif;\n}\n',
         'json': '{\n  "name": "project"\n}\n',
@@ -109,9 +168,15 @@ const EditorPage: React.FC = () => {
       
       await fileAPI.create(projectId!, { path: fileName, content });
       await loadFileTree();
+      
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('system', `✓ Created ${fileName}\n`);
+      }
     } catch (error) {
       console.error('Failed to create file', error);
-      alert('Failed to create file');
+      if ((window as any).addTerminalOutput) {
+        (window as any).addTerminalOutput('stderr', `✗ Failed to create file\n`);
+      }
     }
   };
 
@@ -181,22 +246,43 @@ const EditorPage: React.FC = () => {
             <BarChart3 size={18} />
             Analysis
           </button>
-          <button
-            style={{
-              padding: '0.5rem 1rem',
-              background: '#2196F3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Play size={18} />
-            Run
-          </button>
+          {running ? (
+            <button
+              onClick={handleStop}
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#f44336',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <Square size={18} />
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleRun}
+              style={{
+                padding: '0.5rem 1rem',
+                background: '#2196F3',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <Play size={18} />
+              Run
+            </button>
+          )}
         </div>
       </nav>
 
@@ -235,7 +321,8 @@ const EditorPage: React.FC = () => {
                   fontSize: 14,
                   lineNumbers: 'on',
                   rulers: [80],
-                  wordWrap: 'on'
+                  wordWrap: 'on',
+                  automaticLayout: true
                 }}
               />
             ) : (
@@ -253,7 +340,7 @@ const EditorPage: React.FC = () => {
           </div>
 
           <div style={{ height: '200px', borderTop: '1px solid #333' }}>
-            <Terminal projectId={projectId || ''} />
+            <Terminal projectId={projectId || ''} running={running} />
           </div>
         </div>
       </div>
