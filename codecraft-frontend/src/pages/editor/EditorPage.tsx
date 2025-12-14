@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { projectAPI, fileAPI } from '../../services/api';
-import { executionService } from '../../services/executionService';
+import { projectAPI, fileAPI, executionAPI } from '../../services/api';
 import { Project, FileNode } from '../../types';
 import Editor from '@monaco-editor/react';
 import FileTree from '../../components/editor/FileTree';
@@ -18,6 +17,7 @@ const EditorPage: React.FC = () => {
   const [language, setLanguage] = useState<string>('javascript');
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<Array<{ level: string; message: string; timestamp: string }>>([]);
+  const [executionId, setExecutionId] = useState<string | null>(null);
 
   useEffect(() => {
     if (projectId) {
@@ -26,11 +26,30 @@ const EditorPage: React.FC = () => {
     }
   }, [projectId]);
 
+  // Poll for logs every 500ms when execution is running
   useEffect(() => {
-    return () => {
-      executionService.disconnect();
-    };
-  }, []);
+    if (!executionId || !running) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await executionAPI.getLogs(executionId);
+        setLogs(response.data);
+        
+        // Check execution status
+        const execResponse = await executionAPI.get(executionId);
+        const status = execResponse.data.status;
+        
+        if (['SUCCESS', 'FAILED', 'STOPPED', 'TIMEOUT'].includes(status)) {
+          setRunning(false);
+          clearInterval(interval);
+        }
+      } catch (error) {
+        console.error('Failed to fetch logs', error);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [executionId, running]);
 
   const loadProject = async () => {
     try {
@@ -107,18 +126,9 @@ const EditorPage: React.FC = () => {
     addLog('INFO', `🚀 Starting execution (${project.language})...`);
     
     try {
-      const execution = await executionService.execute(projectId!, project.language);
-      addLog('INFO', `Execution ID: ${execution.id}`);
-      
-      executionService.connectWebSocket(execution.id, (message) => {
-        console.log('Received WebSocket message:', message);
-        addLog(message.level || 'INFO', message.message || JSON.stringify(message));
-      });
-      
-      setTimeout(() => {
-        setRunning(false);
-      }, 60000);
-      
+      const execution = await executionAPI.start(projectId!, project.language);
+      setExecutionId(execution.data.id);
+      addLog('INFO', `Execution ID: ${execution.data.id}`);
     } catch (error: any) {
       console.error('Failed to execute', error);
       addLog('ERROR', `✗ Failed to start execution: ${error.response?.data?.message || error.message}`);
@@ -126,10 +136,15 @@ const EditorPage: React.FC = () => {
     }
   };
 
-  const handleStop = () => {
-    executionService.disconnect();
-    setRunning(false);
-    addLog('INFO', '⏹ Execution stopped');
+  const handleStop = async () => {
+    if (!executionId) return;
+    try {
+      await executionAPI.stop(executionId);
+      setRunning(false);
+      addLog('INFO', '⏹ Execution stopped');
+    } catch (error) {
+      console.error('Failed to stop execution', error);
+    }
   };
 
   const handleCreateFile = async () => {
