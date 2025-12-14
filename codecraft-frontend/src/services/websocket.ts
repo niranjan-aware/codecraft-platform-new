@@ -11,19 +11,19 @@ export class WebSocketService {
     }
 
     this.client = new Client({
-      brokerURL: 'ws://localhost:8083/ws',
+      brokerURL: 'ws://localhost:8083/ws/execution',
       reconnectDelay: 5000,
       heartbeatIncoming: 4000,
       heartbeatOutgoing: 4000,
       onConnect: () => {
-        console.log('WebSocket connected');
+        console.log('✅ WebSocket connected');
         if (onConnect) onConnect();
       },
       onStompError: (frame) => {
-        console.error('STOMP error:', frame);
+        console.error('❌ STOMP error:', frame);
       },
       onWebSocketError: (event) => {
-        console.error('WebSocket error:', event);
+        console.error('❌ WebSocket error:', event);
       },
       onWebSocketClose: () => {
         console.log('WebSocket closed');
@@ -39,11 +39,15 @@ export class WebSocketService {
       return;
     }
 
+    console.log('📡 Subscribing to:', `/topic/execution/${executionId}`);
+
     const subscription = this.client.subscribe(
-      `/topic/logs/${executionId}`,
+      `/topic/execution/${executionId}`,  // ✅ FIXED!
       (message: IMessage) => {
+        console.log('📨 Received message:', message.body);
         try {
           const log = JSON.parse(message.body);
+          console.log('✅ Parsed log:', log);
           callback(log);
         } catch (e) {
           console.error('Failed to parse log message:', e);

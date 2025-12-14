@@ -5,6 +5,7 @@ import com.codecraft.execution.dto.ExecutionResponse;
 import com.codecraft.execution.dto.LogMessage;
 import com.codecraft.execution.entity.Execution;
 import com.codecraft.execution.entity.ExecutionLog;
+import com.codecraft.execution.event.LogEvent;
 import com.codecraft.execution.repository.ExecutionLogRepository;
 import com.codecraft.execution.repository.ExecutionRepository;
 import com.github.dockerjava.api.DockerClient;
@@ -13,7 +14,7 @@ import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.core.command.ExecStartResultCallback;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,8 +32,8 @@ public class ExecutionService {
     private final ExecutionLogRepository logRepository;
     private final DockerService dockerService;
     private final StorageService storageService;
-    private final SimpMessagingTemplate messagingTemplate;
     private final DockerClient dockerClient;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     @Transactional
     public ExecutionResponse startExecution(ExecutionRequest request, UUID userId) {
@@ -61,6 +62,8 @@ public class ExecutionService {
             execution.setStatus(Execution.ExecutionStatus.RUNNING);
             execution.setStartedAt(LocalDateTime.now());
             executionRepository.save(execution);
+
+            Thread.sleep(1000); // Wait for WebSocket subscription
 
             sendLog(execution.getId(), "INFO", "Starting execution...");
 
@@ -208,14 +211,19 @@ public class ExecutionService {
     }
 
     private void sendLog(UUID executionId, String level, String message) {
-        ExecutionLog log = new ExecutionLog();
-        log.setExecutionId(executionId);
-        log.setLogLevel(ExecutionLog.LogLevel.valueOf(level));
-        log.setMessage(message);
-        logRepository.save(log);
+        log.info("=== PUBLISHING LOG EVENT ===");
+        log.info("Execution ID: {}", executionId);
+        log.info("Level: {}, Message: {}", level, message);
+        
+        ExecutionLog executionLog = new ExecutionLog();
+        executionLog.setExecutionId(executionId);
+        executionLog.setLogLevel(ExecutionLog.LogLevel.valueOf(level));
+        executionLog.setMessage(message);
+        logRepository.save(executionLog);
 
-        LogMessage logMessage = new LogMessage(level, message, LocalDateTime.now());
-        messagingTemplate.convertAndSend("/topic/logs/" + executionId, logMessage);
+        // Publish event - will be handled by LogEventListener in main thread
+        applicationEventPublisher.publishEvent(new LogEvent(executionId, level, message));
+        log.info("✅ Event published");
     }
 
     public ExecutionResponse getExecution(UUID executionId, UUID userId) {
@@ -266,10 +274,10 @@ public class ExecutionService {
         }
 
         return logRepository.findByExecutionIdOrderByTimestampAsc(executionId).stream()
-            .map(log -> new LogMessage(
-                log.getLogLevel().name(),
-                log.getMessage(),
-                log.getTimestamp()
+            .map(logEntry -> new LogMessage(
+                logEntry.getLogLevel().name(),
+                logEntry.getMessage(),
+                logEntry.getTimestamp()
             ))
             .toList();
     }

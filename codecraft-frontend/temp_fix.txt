@@ -1,0 +1,37 @@
+  const loadFileContent = async (path: string) => {
+    try {
+      const response = await fileAPI.get(projectId!, path);
+      setFileContent(response.data.content);
+      setCurrentFile(path);
+      
+      const ext = path.split('.').pop()?.toLowerCase() || '';
+      const langMap: { [key: string]: string } = {
+        'js': 'javascript',
+        'jsx': 'javascript',
+        'ts': 'typescript',
+        'tsx': 'typescript',
+        'py': 'python',
+        'java': 'java',
+        'html': 'html',
+        'css': 'css',
+        'json': 'json',
+        'md': 'markdown'
+      };
+      setLanguage(langMap[ext] || 'plaintext');
+    } catch (error) {
+      console.error('Failed to load file content', error);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!currentFile) return;
+    
+    try {
+      await fileAPI.update(projectId!, currentFile, fileContent);
+      
+      addLog('INFO', `✓ Saved ${currentFile}`);
+    } catch (error) {
+      console.error('Failed to save file', error);
+      addLog('ERROR', `✗ Failed to save ${currentFile}`);
+    }
+  };

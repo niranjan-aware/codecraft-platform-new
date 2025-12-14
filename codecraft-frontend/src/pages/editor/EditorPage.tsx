@@ -17,13 +17,13 @@ const EditorPage: React.FC = () => {
   const [fileContent, setFileContent] = useState<string>('');
   const [language, setLanguage] = useState<string>('javascript');
   const [running, setRunning] = useState(false);
+  const [logs, setLogs] = useState<Array<{ level: string; message: string; timestamp: string }>>([]);
 
   useEffect(() => {
     if (projectId) {
       loadProject();
       loadFileTree();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {
@@ -88,53 +88,40 @@ const EditorPage: React.FC = () => {
     if (!currentFile) return;
     try {
       await fileAPI.update(projectId!, currentFile, fileContent);
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('system', `✓ Saved ${currentFile}\n`);
-      }
+      addLog('INFO', `✓ Saved ${currentFile}`);
     } catch (error) {
       console.error('Failed to save file', error);
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('stderr', `✗ Failed to save ${currentFile}\n`);
-      }
+      addLog('ERROR', `✗ Failed to save ${currentFile}`);
     }
+  };
+
+  const addLog = (level: string, message: string) => {
+    setLogs(prev => [...prev, { level, message, timestamp: new Date().toISOString() }]);
   };
 
   const handleRun = async () => {
     if (!project) return;
     
     setRunning(true);
-    
-    if ((window as any).addTerminalOutput) {
-      (window as any).addTerminalOutput('system', `\n🚀 Starting execution (${project.language})...\n`);
-    }
+    setLogs([]);
+    addLog('INFO', `🚀 Starting execution (${project.language})...`);
     
     try {
       const execution = await executionService.execute(projectId!, project.language);
-      
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('system', `Execution ID: ${execution.id}\n`);
-      }
+      addLog('INFO', `Execution ID: ${execution.id}`);
       
       executionService.connectWebSocket(execution.id, (message) => {
-        if ((window as any).addTerminalOutput) {
-          if (message.type === 'OUTPUT') {
-            (window as any).addTerminalOutput('stdout', message.data);
-          } else if (message.type === 'ERROR') {
-            (window as any).addTerminalOutput('stderr', message.data);
-          } else if (message.type === 'COMPLETED') {
-            (window as any).addTerminalOutput('system', '\n✓ Execution completed\n');
-            setRunning(false);
-          } else if (message.type === 'FAILED') {
-            (window as any).addTerminalOutput('stderr', '\n✗ Execution failed\n');
-            setRunning(false);
-          }
-        }
+        console.log('Received WebSocket message:', message);
+        addLog(message.level || 'INFO', message.message || JSON.stringify(message));
       });
+      
+      setTimeout(() => {
+        setRunning(false);
+      }, 60000);
+      
     } catch (error: any) {
       console.error('Failed to execute', error);
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('stderr', `✗ Failed to start execution: ${error.response?.data?.message || error.message}\n`);
-      }
+      addLog('ERROR', `✗ Failed to start execution: ${error.response?.data?.message || error.message}`);
       setRunning(false);
     }
   };
@@ -142,9 +129,7 @@ const EditorPage: React.FC = () => {
   const handleStop = () => {
     executionService.disconnect();
     setRunning(false);
-    if ((window as any).addTerminalOutput) {
-      (window as any).addTerminalOutput('system', '\n⏹ Execution stopped\n');
-    }
+    addLog('INFO', '⏹ Execution stopped');
   };
 
   const handleCreateFile = async () => {
@@ -168,15 +153,10 @@ const EditorPage: React.FC = () => {
       
       await fileAPI.create(projectId!, { path: fileName, content });
       await loadFileTree();
-      
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('system', `✓ Created ${fileName}\n`);
-      }
+      addLog('INFO', `✓ Created ${fileName}`);
     } catch (error) {
       console.error('Failed to create file', error);
-      if ((window as any).addTerminalOutput) {
-        (window as any).addTerminalOutput('stderr', `✗ Failed to create file\n`);
-      }
+      addLog('ERROR', '✗ Failed to create file');
     }
   };
 
@@ -340,7 +320,7 @@ const EditorPage: React.FC = () => {
           </div>
 
           <div style={{ height: '200px', borderTop: '1px solid #333' }}>
-            <Terminal projectId={projectId || ''} running={running} />
+            <Terminal logs={logs} />
           </div>
         </div>
       </div>

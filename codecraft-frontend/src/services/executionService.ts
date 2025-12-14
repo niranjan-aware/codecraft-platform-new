@@ -42,16 +42,19 @@ class ExecutionService {
     });
 
     this.stompClient.onConnect = () => {
-      console.log('Connected to WebSocket');
+      console.log('✅ Connected to WebSocket');
+      console.log('📡 Subscribing to: /topic/execution/' + executionId);
       
       this.stompClient?.subscribe(`/topic/execution/${executionId}`, (message) => {
+        console.log('📨 Received message:', message.body);
         const body = JSON.parse(message.body);
+        console.log('✅ Parsed:', body);
         onMessage(body);
       });
     };
 
     this.stompClient.onStompError = (frame) => {
-      console.error('Broker error: ' + frame.headers['message']);
+      console.error('❌ Broker error: ' + frame.headers['message']);
       console.error('Additional details: ' + frame.body);
     };
 

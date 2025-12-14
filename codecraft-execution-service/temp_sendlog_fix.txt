@@ -1,0 +1,14 @@
+    private void sendLog(UUID executionId, String level, String message) {
+        log.info("=== PUBLISHING LOG EVENT ===");
+        log.info("Execution ID: {}", executionId);
+        log.info("Level: {}, Message: {}", level, message);
+        
+        ExecutionLog executionLog = new ExecutionLog();
+        executionLog.setExecutionId(executionId);
+        executionLog.setLogLevel(ExecutionLog.LogLevel.valueOf(level));
+        executionLog.setMessage(message);
+        logRepository.save(executionLog);
+
+        // Publish event to be handled by main thread
+        applicationEventPublisher.publishEvent(new LogEvent(executionId, level, message));
+    }
