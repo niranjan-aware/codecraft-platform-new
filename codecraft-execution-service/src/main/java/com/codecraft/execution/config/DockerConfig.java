@@ -4,14 +4,11 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
-import com.github.dockerjava.httpclient5.ApacheDockerHttpClient;
+import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.github.dockerjava.transport.DockerHttpClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.time.Duration;
-import java.util.Properties;
 
 @Slf4j
 @Configuration
@@ -20,26 +17,35 @@ public class DockerConfig {
     @Bean
     public DockerClient dockerClient() {
         String dockerHost = "unix:///var/run/docker.sock";
-        log.info("=== CREATING DOCKER CLIENT WITH HOST: {} ===", dockerHost);
         
-        Properties props = new Properties();
-        props.setProperty("DOCKER_HOST", dockerHost);
+        log.info("=== CREATING DOCKER CLIENT (Zerodep Transport) ===");
+        log.info("Docker Host: {}", dockerHost);
         
         DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
-                .withProperties(props)
+                .withDockerHost(dockerHost)
                 .build();
 
-        log.info("=== FINAL DOCKER HOST: {} ===", config.getDockerHost());
+        log.info("Config Docker Host: {}", config.getDockerHost());
 
-        DockerHttpClient httpClient = new ApacheDockerHttpClient.Builder()
+        DockerHttpClient httpClient = new ZerodepDockerHttpClient.Builder()
                 .dockerHost(config.getDockerHost())
-                .maxConnections(100)
-                .connectionTimeout(Duration.ofSeconds(30))
-                .responseTimeout(Duration.ofSeconds(45))
                 .build();
 
         DockerClient client = DockerClientImpl.getInstance(config, httpClient);
-        log.info("=== DOCKER CLIENT CREATED ===");
+        
+        try {
+            log.info("Testing Docker connection...");
+            client.pingCmd().exec();
+            log.info("✅ Docker PING successful!");
+            
+            var version = client.versionCmd().exec();
+            log.info("✅ Docker Version: {}", version.getVersion());
+            log.info("✅ API Version: {}", version.getApiVersion());
+        } catch (Exception e) {
+            log.error("❌ Docker connection failed!", e);
+            throw new RuntimeException("Cannot connect to Docker", e);
+        }
+        
         return client;
     }
 }

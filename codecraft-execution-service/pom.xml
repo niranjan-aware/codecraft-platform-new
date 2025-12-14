@@ -60,6 +60,7 @@
             <scope>runtime</scope>
         </dependency>
         
+        <!-- Docker Java with Zerodep Transport (native Unix socket support) -->
         <dependency>
             <groupId>com.github.docker-java</groupId>
             <artifactId>docker-java-core</artifactId>
@@ -68,26 +69,8 @@
         
         <dependency>
             <groupId>com.github.docker-java</groupId>
-            <artifactId>docker-java-transport-httpclient5</artifactId>
+            <artifactId>docker-java-transport-zerodep</artifactId>
             <version>${docker-java.version}</version>
-        </dependency>
-        
-        <dependency>
-            <groupId>org.apache.httpcomponents.client5</groupId>
-            <artifactId>httpclient5</artifactId>
-            <version>5.2.3</version>
-        </dependency>
-        
-        <dependency>
-            <groupId>org.apache.httpcomponents.core5</groupId>
-            <artifactId>httpcore5</artifactId>
-            <version>5.2.4</version>
-        </dependency>
-        
-        <dependency>
-            <groupId>org.apache.httpcomponents.core5</groupId>
-            <artifactId>httpcore5-h2</artifactId>
-            <version>5.2.4</version>
         </dependency>
         
         <dependency>
