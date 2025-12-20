@@ -15,12 +15,16 @@ public class ExecutionResponse {
     private String containerId;
     private Execution.ExecutionStatus status;
     private Execution.Language language;
+    private Execution.ProjectType projectType;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
+    private LocalDateTime autoStopAt;
+    private Integer hostPort;
+    private Integer containerPort;
+    private String publicUrl;
     private Long cpuUsage;
     private Long memoryUsage;
     private Integer exitCode;
-    private Integer port;
     private String errorMessage;
     private LocalDateTime createdAt;
 }

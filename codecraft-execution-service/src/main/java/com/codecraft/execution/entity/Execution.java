@@ -36,17 +36,27 @@ public class Execution {
     @Column(nullable = false)
     private Language language;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ProjectType projectType = ProjectType.SCRIPT;
+
     private LocalDateTime startedAt;
 
     private LocalDateTime completedAt;
+
+    private LocalDateTime autoStopAt;
+
+    private Integer hostPort;
+
+    private Integer containerPort;
+
+    private String publicUrl;
 
     private Long cpuUsage;
 
     private Long memoryUsage;
 
     private Integer exitCode;
-
-    private Integer port;
 
     @Column(length = 5000)
     private String errorMessage;
@@ -61,5 +71,9 @@ public class Execution {
 
     public enum Language {
         NODEJS, PYTHON, JAVA, HTML_CSS_JS
+    }
+
+    public enum ProjectType {
+        SCRIPT, SERVER
     }
 }

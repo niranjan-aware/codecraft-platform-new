@@ -6,12 +6,14 @@ import com.codecraft.project.entity.ProjectFile;
 import com.codecraft.project.repository.ProjectFileRepository;
 import com.codecraft.project.repository.ProjectRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class FileService {
@@ -21,9 +23,11 @@ public class FileService {
     private final StorageService storageService;
 
     @Transactional
-    public FileResponse createFile(String userId, UUID projectId, FileRequest request) {
+    public FileResponse createFile(UUID projectId, FileRequest request, UUID userId) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
+
+        log.info("Creating file - Project userId: {}, Request userId: {}", project.getUserId(), userId);
 
         if (!project.getUserId().equals(userId)) {
             throw new RuntimeException("Unauthorized");
@@ -49,7 +53,7 @@ public class FileService {
     }
 
     @Transactional
-    public FileResponse updateFile(String userId, UUID projectId, String path, String content) {
+    public FileResponse updateFile(UUID projectId, String path, FileRequest request, UUID userId) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 
@@ -60,17 +64,24 @@ public class FileService {
         ProjectFile file = fileRepository.findByProjectIdAndPath(projectId, path)
                 .orElseThrow(() -> new RuntimeException("File not found"));
 
-        String minioKey = storageService.uploadFile(projectId, path, content);
+        String minioKey = storageService.uploadFile(projectId, request.getPath(), request.getContent());
 
         file.setMinioKey(minioKey);
-        file.setSizeBytes((long) content.getBytes().length);
+        file.setSizeBytes((long) request.getContent().getBytes().length);
 
         file = fileRepository.save(file);
 
         return mapToResponse(file);
     }
 
-    public FileContentResponse getFile(UUID projectId, String path) {
+    public FileContentResponse getFile(UUID projectId, String path, UUID userId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found"));
+
+        if (!project.getUserId().equals(userId) && project.getVisibility() == Project.Visibility.PRIVATE) {
+            throw new RuntimeException("Unauthorized");
+        }
+
         ProjectFile file = fileRepository.findByProjectIdAndPath(projectId, path)
                 .orElseThrow(() -> new RuntimeException("File not found"));
 
@@ -79,23 +90,26 @@ public class FileService {
         return new FileContentResponse(mapToResponse(file), content);
     }
 
-    public FileContentResponse getFileWithContent(UUID projectId, String path) {
-        return getFile(projectId, path);
-    }
+    public List<FileResponse> listFiles(UUID projectId, UUID userId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new RuntimeException("Project not found"));
 
-    public List<FileResponse> listFiles(UUID projectId) {
+        if (!project.getUserId().equals(userId) && project.getVisibility() == Project.Visibility.PRIVATE) {
+            throw new RuntimeException("Unauthorized");
+        }
+
         return fileRepository.findByProjectId(projectId).stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
-    public FileTreeNode getFileTree(UUID projectId) {
-        List<FileResponse> files = listFiles(projectId);
+    public FileTreeNode getFileTree(UUID projectId, UUID userId) {
+        List<FileResponse> files = listFiles(projectId, userId);
         return buildFileTree(files);
     }
 
     @Transactional
-    public void deleteFile(String userId, UUID projectId, String path) {
+    public void deleteFile(UUID projectId, String path, UUID userId) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new RuntimeException("Project not found"));
 

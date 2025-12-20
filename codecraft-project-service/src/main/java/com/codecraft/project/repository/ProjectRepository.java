@@ -9,8 +9,6 @@ import java.util.UUID;
 
 @Repository
 public interface ProjectRepository extends JpaRepository<Project, UUID> {
-    
-    List<Project> findByUserId(String userId);  // Back to String!
-    
+    List<Project> findByUserId(UUID userId);
     List<Project> findByVisibility(Project.Visibility visibility);
 }

@@ -26,7 +26,7 @@ public class DockerService {
     @Value("${execution.container.cpu-limit}")
     private Double cpuLimit;
 
-    @Value("${execution.container.network-disabled}")
+    @Value("${execution.container.network-disabled:false}")
     private Boolean networkDisabled;
 
     private static final Map<Execution.Language, String> LANGUAGE_IMAGES = Map.of(
@@ -56,7 +56,14 @@ public class DockerService {
         }
     }
 
-    public String createContainer(Execution.Language language, String workingDir, Map<String, String> env) {
+    public String createContainer(
+            Execution.Language language, 
+            String workingDir, 
+            Map<String, String> env,
+            Integer hostPort,
+            Integer containerPort,
+            boolean isServer) {
+        
         ensureImageExists(language);
         
         String imageName = LANGUAGE_IMAGES.get(language);
@@ -64,12 +71,28 @@ public class DockerService {
         HostConfig hostConfig = HostConfig.newHostConfig()
             .withMemory(parseMemoryLimit(memoryLimit))
             .withNanoCPUs((long) (cpuLimit * 1_000_000_000))
-            .withNetworkMode(networkDisabled ? "none" : "bridge")
             .withBinds(new Bind(workingDir, new Volume("/workspace")))
             .withAutoRemove(false);
 
+        if (isServer && hostPort != null && containerPort != null) {
+            hostConfig.withPortBindings(
+                new PortBinding(
+                    Ports.Binding.bindPort(hostPort),
+                    ExposedPort.tcp(containerPort)
+                )
+            );
+            hostConfig.withNetworkMode("bridge");
+            log.info("Port mapping: {}:{}", hostPort, containerPort);
+        } else {
+            hostConfig.withNetworkMode(networkDisabled ? "none" : "bridge");
+        }
+
         List<String> envList = new ArrayList<>();
         env.forEach((key, value) -> envList.add(key + "=" + value));
+
+        ExposedPort[] exposedPorts = isServer && containerPort != null 
+            ? new ExposedPort[]{ExposedPort.tcp(containerPort)}
+            : new ExposedPort[]{};
 
         CreateContainerResponse container = dockerClient.createContainerCmd(imageName)
             .withHostConfig(hostConfig)
@@ -78,6 +101,7 @@ public class DockerService {
             .withTty(true)
             .withAttachStdout(true)
             .withAttachStderr(true)
+            .withExposedPorts(exposedPorts)
             .withCmd(getDefaultCommand(language))
             .exec();
 

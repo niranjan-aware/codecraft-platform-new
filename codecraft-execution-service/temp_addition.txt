@@ -1,0 +1,9 @@
+
+    public List<ExecutionResponse> getRunningExecutions(UUID userId) {
+        return executionRepository.findByUserId(userId).stream()
+            .filter(e -> e.getStatus() == Execution.ExecutionStatus.RUNNING)
+            .map(this::mapToResponse)
+            .toList();
+    }
+
+    private ExecutionResponse mapToResponse(Execution execution) {

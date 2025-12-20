@@ -66,13 +66,16 @@ export const executionAPI = {
     api.get(`/executions/${executionId}`),
 
   stop: (executionId: string) =>
-    api.delete(`/executions/${executionId}`),
+    api.post(`/executions/${executionId}/stop`),
 
   getLogs: (executionId: string) =>
     api.get(`/executions/${executionId}/logs`),
 
   getByProject: (projectId: string) =>
-    api.get(`/executions/project/${projectId}`)
+    api.get(`/executions/project/${projectId}`),
+
+  getRunning: () =>
+    api.get('/executions/user/running')
 };
 
 export const analysisAPI = {

@@ -1,72 +1,63 @@
-import axios from 'axios';
-import SockJS from 'sockjs-client';
-import { Client } from '@stomp/stompjs';
+import api from './api';
 
-const API_BASE = 'http://localhost:8080/api';
-
-class ExecutionService {
-  private stompClient: Client | null = null;
-
-  async execute(projectId: string, language: string) {
-    try {
-      const token = localStorage.getItem('token');
-      
-      const response = await axios.post(
-        `${API_BASE}/executions`,
-        { 
-          projectId, 
-          language: language.toUpperCase()
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-      return response.data;
-    } catch (error) {
-      console.error('Failed to start execution', error);
-      throw error;
-    }
-  }
-
-  connectWebSocket(executionId: string, onMessage: (message: any) => void) {
-    const socket = new SockJS('http://localhost:8083/ws/execution');
-    
-    this.stompClient = new Client({
-      webSocketFactory: () => socket as any,
-      debug: (str) => console.log(str),
-      reconnectDelay: 5000,
-      heartbeatIncoming: 4000,
-      heartbeatOutgoing: 4000,
-    });
-
-    this.stompClient.onConnect = () => {
-      console.log('✅ Connected to WebSocket');
-      console.log('📡 Subscribing to: /topic/execution/' + executionId);
-      
-      this.stompClient?.subscribe(`/topic/execution/${executionId}`, (message) => {
-        console.log('📨 Received message:', message.body);
-        const body = JSON.parse(message.body);
-        console.log('✅ Parsed:', body);
-        onMessage(body);
-      });
-    };
-
-    this.stompClient.onStompError = (frame) => {
-      console.error('❌ Broker error: ' + frame.headers['message']);
-      console.error('Additional details: ' + frame.body);
-    };
-
-    this.stompClient.activate();
-  }
-
-  disconnect() {
-    if (this.stompClient) {
-      this.stompClient.deactivate();
-      this.stompClient = null;
-    }
-  }
+export interface ExecutionRequest {
+  projectId: string;
+  language: string;
 }
 
-export const executionService = new ExecutionService();
+export interface ExecutionResponse {
+  id: string;
+  projectId: string;
+  containerId: string | null;
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'STOPPED';
+  language: string;
+  projectType: 'SCRIPT' | 'SERVER' | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  autoStopAt: string | null;
+  hostPort: number | null;
+  containerPort: number | null;
+  publicUrl: string | null;
+  cpuUsage: number | null;
+  memoryUsage: number | null;
+  exitCode: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface LogMessage {
+  level: string;
+  message: string;
+  timestamp: string;
+}
+
+export const executionService = {
+  async startExecution(request: ExecutionRequest): Promise<ExecutionResponse> {
+    const response = await api.post('/executions', request);
+    return response.data;
+  },
+
+  async getExecution(executionId: string): Promise<ExecutionResponse> {
+    const response = await api.get(`/executions/${executionId}`);
+    return response.data;
+  },
+
+  async getExecutionsByProject(projectId: string): Promise<ExecutionResponse[]> {
+    const response = await api.get(`/executions/project/${projectId}`);
+    return response.data;
+  },
+
+  async getLogs(executionId: string): Promise<LogMessage[]> {
+    const response = await api.get(`/executions/${executionId}/logs`);
+    return response.data;
+  },
+
+  async stopExecution(executionId: string): Promise<void> {
+    await api.post(`/executions/${executionId}/stop`);
+  },
+
+  async getRunningExecutions(): Promise<ExecutionResponse[]> {
+    const response = await api.get('/executions/user/running');
+    return response.data;
+  }
+};

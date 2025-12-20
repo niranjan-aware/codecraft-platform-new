@@ -4,7 +4,11 @@
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/config/MinioConfig.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/client/ProjectServiceClient.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/event/LogEvent.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/service/ExecutionCleanupService.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/service/PortAllocationService.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/service/EnvironmentParser.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/ExecutionServiceApplication.java
+/Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/service/ProjectTypeDetector.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/dto/ExecutionResponse.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/entity/Execution.java
 /Users/niranjanaware/Documents/Code/codecraft-platform/codecraft-execution-service/src/main/java/com/codecraft/execution/dto/LogMessage.java
