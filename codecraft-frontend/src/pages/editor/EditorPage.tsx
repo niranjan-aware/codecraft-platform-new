@@ -1,192 +1,250 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { projectAPI, fileAPI, executionAPI } from '../../services/api';
-import { Project, FileNode } from '../../types';
-import Editor from '@monaco-editor/react';
+import { useSelector } from 'react-redux';
+import Split from 'react-split';
+import { RootState } from '../../store';
+import { projectService } from '../../services/projectService';
+import { fileService } from '../../services/fileService';
+import { executionService } from '../../services/executionService';
+import { wsService } from '../../services/websocket';
 import FileTree from '../../components/editor/FileTree';
+import CodeEditor from '../../components/editor/CodeEditor';
 import Terminal from '../../components/editor/Terminal';
-import { Play, Square, ArrowLeft, Save, BarChart3 } from 'lucide-react';
+import { FileTreeNode, EditorFile, LogMessage, Project, Execution } from '../../types';
+import { Play, Square, Save, ArrowLeft, FilePlus, BarChart3 } from 'lucide-react';
 
-const EditorPage: React.FC = () => {
+export default function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const user = useSelector((state: RootState) => state.auth.user);
+
   const [project, setProject] = useState<Project | null>(null);
-  const [fileTree, setFileTree] = useState<FileNode[]>([]);
-  const [currentFile, setCurrentFile] = useState<string>('');
-  const [fileContent, setFileContent] = useState<string>('');
-  const [language, setLanguage] = useState<string>('javascript');
-  const [running, setRunning] = useState(false);
-  const [logs, setLogs] = useState<Array<{ level: string; message: string; timestamp: string }>>([]);
-  const [executionId, setExecutionId] = useState<string | null>(null);
+  const [fileTree, setFileTree] = useState<FileTreeNode | null>(null);
+  const [openFiles, setOpenFiles] = useState<EditorFile[]>([]);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [logs, setLogs] = useState<LogMessage[]>([]);
+  const [execution, setExecution] = useState<Execution | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [showNewFileModal, setShowNewFileModal] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [error, setError] = useState<string>('');
 
   useEffect(() => {
-    if (projectId) {
-      loadProject();
-      loadFileTree();
-    }
-  }, [projectId]);
+    loadProject();
+    loadFileTree();
 
-  // Poll for logs every 500ms when execution is running
-  useEffect(() => {
-    if (!executionId || !running) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const response = await executionAPI.getLogs(executionId);
-        setLogs(response.data);
-        
-        // Check execution status
-        const execResponse = await executionAPI.get(executionId);
-        const status = execResponse.data.status;
-        
-        if (['SUCCESS', 'FAILED', 'STOPPED', 'TIMEOUT'].includes(status)) {
-          setRunning(false);
-          clearInterval(interval);
-        }
-      } catch (error) {
-        console.error('Failed to fetch logs', error);
+    return () => {
+      if (execution) {
+        wsService.unsubscribeLogs(execution.id);
       }
-    }, 500);
-
-    return () => clearInterval(interval);
-  }, [executionId, running]);
+      wsService.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   const loadProject = async () => {
     try {
-      const response = await projectAPI.get(projectId!);
-      setProject(response.data);
-      setLanguage(response.data.language);
+      const response = await projectService.getProject(projectId!);
+      setProject(response);
     } catch (error) {
       console.error('Failed to load project', error);
+      setError('Failed to load project');
     }
   };
 
   const loadFileTree = async () => {
     try {
-      const response = await fileAPI.getTree(projectId!);
-      const data = response.data;
-      if (Array.isArray(data)) {
-        setFileTree(data);
-      } else if (data && typeof data === 'object') {
-        setFileTree([data]);
-      } else {
-        setFileTree([]);
-      }
-    } catch (error) {
+      const response = await fileService.getFileTree(projectId!);
+      setFileTree(response);
+    } catch (error: any) {
       console.error('Failed to load file tree', error);
-      setFileTree([]);
+      
+      if (error.response?.status === 404 || !error.response) {
+        setFileTree({
+          name: 'root',
+          path: '/',
+          type: 'directory',
+          children: []
+        });
+      }
     }
   };
 
   const handleFileSelect = async (path: string) => {
+    const existingFile = openFiles.find(f => f.path === path);
+    
+    if (existingFile) {
+      setActiveFile(path);
+      return;
+    }
+
     try {
-      const response = await fileAPI.get(projectId!, path);
-      setCurrentFile(path);
-      setFileContent(response.data.content || '');
+      const response = await fileService.getFileContent(projectId!, path);
       
-      const ext = path.split('.').pop();
-      const langMap: { [key: string]: string } = {
-        js: 'javascript',
-        ts: 'typescript',
-        jsx: 'javascript',
-        tsx: 'typescript',
-        py: 'python',
-        java: 'java',
-        html: 'html',
-        css: 'css',
-        json: 'json',
-        md: 'markdown'
+      const newFile: EditorFile = {
+        path,
+        content: response.content,
+        language: detectLanguage(path),
+        modified: false
       };
-      setLanguage(langMap[ext || ''] || 'javascript');
+
+      setOpenFiles([...openFiles, newFile]);
+      setActiveFile(path);
     } catch (error) {
       console.error('Failed to load file', error);
+      setError('Failed to load file');
     }
   };
 
-  const handleSave = async () => {
-    if (!currentFile) return;
+  const handleCreateFile = async () => {
+    if (!newFileName.trim()) return;
+
     try {
-      await fileAPI.update(projectId!, currentFile, fileContent);
-      addLog('INFO', `✓ Saved ${currentFile}`);
+      await fileService.createFile(projectId!, {
+        path: newFileName,
+        content: ''
+      });
+
+      setShowNewFileModal(false);
+      setNewFileName('');
+      loadFileTree();
+      
+      setTimeout(() => {
+        handleFileSelect(newFileName);
+      }, 500);
+    } catch (error) {
+      console.error('Failed to create file', error);
+      setError('Failed to create file');
+    }
+  };
+
+  const handleEditorChange = (value: string | undefined) => {
+    if (!activeFile || value === undefined) return;
+
+    setOpenFiles(openFiles.map(file => 
+      file.path === activeFile 
+        ? { ...file, content: value, modified: true }
+        : file
+    ));
+  };
+
+  const handleSaveFile = async () => {
+    if (!activeFile) return;
+
+    const file = openFiles.find(f => f.path === activeFile);
+    if (!file) return;
+
+    try {
+      await fileService.updateFile(projectId!, file.path, file.content);
+      setOpenFiles(openFiles.map(f => 
+        f.path === activeFile ? { ...f, modified: false } : f
+      ));
     } catch (error) {
       console.error('Failed to save file', error);
-      addLog('ERROR', `✗ Failed to save ${currentFile}`);
+      setError('Failed to save file');
     }
-  };
-
-  const addLog = (level: string, message: string) => {
-    setLogs(prev => [...prev, { level, message, timestamp: new Date().toISOString() }]);
   };
 
   const handleRun = async () => {
-    if (!project) return;
-    
-    setRunning(true);
-    setLogs([]);
-    addLog('INFO', `🚀 Starting execution (${project.language})...`);
-    
+    if (!project || isExecuting) return;
+
     try {
-      const execution = await executionAPI.start(projectId!, project.language);
-      setExecutionId(execution.data.id);
-      addLog('INFO', `Execution ID: ${execution.data.id}`);
-    } catch (error: any) {
-      console.error('Failed to execute', error);
-      addLog('ERROR', `✗ Failed to start execution: ${error.response?.data?.message || error.message}`);
-      setRunning(false);
+      setIsExecuting(true);
+      setLogs([]);
+
+      wsService.connect(() => {
+        console.log('WebSocket connected for logs');
+      });
+
+      const response = await executionService.startExecution({
+        projectId: projectId!,
+        language: project.language
+      });
+      const newExecution = response;
+      setExecution(newExecution);
+
+      wsService.subscribeLogs(newExecution.id, (log: LogMessage) => {
+        setLogs(prev => [...prev, log]);
+      });
+
+      pollExecutionStatus(newExecution.id);
+    } catch (error) {
+      console.error('Failed to start execution', error);
+      setIsExecuting(false);
+      setError('Failed to start execution');
     }
   };
 
+  const pollExecutionStatus = async (executionId: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const exec = await executionService.getExecution(executionId);
+        setExecution(exec);
+
+        if (['SUCCESS', 'FAILED', 'TIMEOUT', 'STOPPED'].includes(exec.status)) {
+          clearInterval(interval);
+          setIsExecuting(false);
+          wsService.unsubscribeLogs(executionId);
+        }
+      } catch (error) {
+        clearInterval(interval);
+        setIsExecuting(false);
+      }
+    }, 2000);
+  };
+
   const handleStop = async () => {
-    if (!executionId) return;
+    if (!execution) return;
+
     try {
-      await executionAPI.stop(executionId);
-      setRunning(false);
-      addLog('INFO', '⏹ Execution stopped');
+      await executionService.stopExecution(execution.id);
+      wsService.unsubscribeLogs(execution.id);
+      setIsExecuting(false);
     } catch (error) {
       console.error('Failed to stop execution', error);
     }
   };
 
-  const handleCreateFile = async () => {
-    const fileName = prompt('Enter file name (e.g., index.js):');
-    if (!fileName) return;
-    
-    try {
-      const ext = fileName.split('.').pop() || '';
-      const defaultContent: { [key: string]: string } = {
-        'js': '// TODO: Add JavaScript code\nconsole.log("Hello World");\n',
-        'ts': '// TODO: Add TypeScript code\nconsole.log("Hello World");\n',
-        'py': '# TODO: Add Python code\nprint("Hello World")\n',
-        'java': 'public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello World");\n  }\n}\n',
-        'html': '<!DOCTYPE html>\n<html>\n<head>\n  <title>Document</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n',
-        'css': '/* Add your styles here */\nbody {\n  font-family: sans-serif;\n}\n',
-        'json': '{\n  "name": "project"\n}\n',
-        'md': '# Document\n\nHello World\n'
-      };
-      
-      const content = defaultContent[ext] || '// TODO: Add content\n';
-      
-      await fileAPI.create(projectId!, { path: fileName, content });
-      await loadFileTree();
-      addLog('INFO', `✓ Created ${fileName}`);
-    } catch (error) {
-      console.error('Failed to create file', error);
-      addLog('ERROR', '✗ Failed to create file');
+  const handleCloseTab = (path: string) => {
+    setOpenFiles(openFiles.filter(f => f.path !== path));
+    if (activeFile === path) {
+      const remainingFiles = openFiles.filter(f => f.path !== path);
+      setActiveFile(remainingFiles.length > 0 ? remainingFiles[0].path : null);
     }
   };
 
+  const detectLanguage = (path: string): string => {
+    const ext = path.split('.').pop()?.toLowerCase();
+    const languageMap: { [key: string]: string } = {
+      js: 'javascript',
+      jsx: 'javascript',
+      ts: 'typescript',
+      tsx: 'typescript',
+      py: 'python',
+      java: 'java',
+      html: 'html',
+      css: 'css',
+      json: 'json',
+      md: 'markdown'
+    };
+    return languageMap[ext || ''] || 'plaintext';
+  };
+
+  const currentFile = openFiles.find(f => f.path === activeFile);
+
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <nav style={{ 
-        background: '#1e1e1e', 
-        color: 'white', 
-        padding: '0.75rem 1rem',
+      <div style={{
+        height: '60px',
+        borderBottom: '1px solid #ddd',
         display: 'flex',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        borderBottom: '1px solid #333'
+        justifyContent: 'space-between',
+        padding: '0 20px',
+        backgroundColor: '#2c3e50',
+        color: 'white'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <button
             onClick={() => navigate('/dashboard')}
             style={{
@@ -196,151 +254,349 @@ const EditorPage: React.FC = () => {
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.5rem'
+              gap: '5px'
             }}
           >
             <ArrowLeft size={20} />
             Back
           </button>
           <h2 style={{ margin: 0 }}>{project?.name || 'Loading...'}</h2>
+          <span style={{ 
+            fontSize: '12px', 
+            padding: '4px 8px', 
+            backgroundColor: '#34495e',
+            borderRadius: '4px'
+          }}>
+            {project?.language}
+          </span>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            onClick={handleSave}
-            disabled={!currentFile}
-            style={{
-              padding: '0.5rem 1rem',
-              background: currentFile ? '#4CAF50' : '#555',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: currentFile ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Save size={18} />
-            Save
-          </button>
+        
+        <div style={{ display: 'flex', gap: '10px' }}>
           <button
             onClick={() => navigate(`/analysis/${projectId}`)}
             style={{
-              padding: '0.5rem 1rem',
-              background: '#9C27B0',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '5px',
+              padding: '8px 16px',
+              backgroundColor: '#9b59b6'
             }}
           >
-            <BarChart3 size={18} />
+            <BarChart3 size={16} />
             Analysis
           </button>
-          {running ? (
-            <button
-              onClick={handleStop}
-              style={{
-                padding: '0.5rem 1rem',
-                background: '#f44336',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}
-            >
-              <Square size={18} />
-              Stop
-            </button>
-          ) : (
+
+          <button
+            onClick={() => setShowNewFileModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '8px 16px',
+              backgroundColor: '#3498db'
+            }}
+          >
+            <FilePlus size={16} />
+            New File
+          </button>
+
+          <button
+            onClick={handleSaveFile}
+            disabled={!currentFile?.modified}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '8px 16px',
+              backgroundColor: currentFile?.modified ? '#27ae60' : '#95a5a6',
+              cursor: currentFile?.modified ? 'pointer' : 'not-allowed'
+            }}
+          >
+            <Save size={16} />
+            Save
+          </button>
+          
+          {!isExecuting ? (
             <button
               onClick={handleRun}
               style={{
-                padding: '0.5rem 1rem',
-                background: '#2196F3',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.5rem'
+                gap: '5px',
+                padding: '8px 16px',
+                backgroundColor: '#27ae60'
               }}
             >
-              <Play size={18} />
+              <Play size={16} />
               Run
+            </button>
+          ) : (
+            <button
+              onClick={handleStop}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '8px 16px',
+                backgroundColor: '#e74c3c'
+              }}
+            >
+              <Square size={16} />
+              Stop
             </button>
           )}
         </div>
-      </nav>
+      </div>
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div style={{ width: '250px', background: '#252526', borderRight: '1px solid #333', overflow: 'auto' }}>
-          <div style={{ padding: '0.5rem', borderBottom: '1px solid #333' }}>
-            <button
-              onClick={handleCreateFile}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                background: '#007acc',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
-            >
-              + New File
-            </button>
-          </div>
-          <FileTree files={fileTree} onFileSelect={handleFileSelect} />
+      {error && (
+        <div style={{
+          padding: '10px',
+          backgroundColor: '#e74c3c',
+          color: 'white',
+          textAlign: 'center'
+        }}>
+          {error}
+          <button onClick={() => setError('')} style={{
+            marginLeft: '10px',
+            background: 'transparent',
+            border: '1px solid white',
+            color: 'white',
+            cursor: 'pointer'
+          }}>
+            Dismiss
+          </button>
         </div>
+      )}
 
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            {currentFile ? (
-              <Editor
-                height="100%"
-                language={language}
-                value={fileContent}
-                onChange={(value) => setFileContent(value || '')}
-                theme="vs-dark"
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  lineNumbers: 'on',
-                  rulers: [80],
-                  wordWrap: 'on',
-                  automaticLayout: true
-                }}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <Split
+          sizes={[20, 80]}
+          minSize={200}
+          style={{ display: 'flex', height: '100%' }}
+        >
+          <div style={{ height: '100%', overflow: 'auto', backgroundColor: '#f5f5f5' }}>
+            {fileTree && fileTree.children && fileTree.children.length > 0 ? (
+              <FileTree
+                tree={fileTree}
+                onFileSelect={handleFileSelect}
+                selectedFile={activeFile}
               />
             ) : (
-              <div style={{ 
-                height: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                color: '#888',
-                background: '#1e1e1e'
+              <div style={{
+                padding: '20px',
+                textAlign: 'center',
+                color: '#666'
               }}>
-                Select a file to edit
+                <p>No files yet</p>
+                <button
+                  onClick={() => setShowNewFileModal(true)}
+                  style={{
+                    marginTop: '10px',
+                    padding: '8px 16px',
+                    backgroundColor: '#3498db',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Create First File
+                </button>
               </div>
             )}
           </div>
 
-          <div style={{ height: '200px', borderTop: '1px solid #333' }}>
-            <Terminal logs={logs} />
+          <Split
+            direction="vertical"
+            sizes={[60, 40]}
+            minSize={100}
+            style={{ height: '100%' }}
+          >
+            <div style={{ height: '100%', backgroundColor: '#1e1e1e' }}>
+              {openFiles.length > 0 && (
+                <div style={{
+                  height: '40px',
+                  backgroundColor: '#2d2d2d',
+                  display: 'flex',
+                  alignItems: 'center',
+                  borderBottom: '1px solid #1e1e1e'
+                }}>
+                  {openFiles.map(file => (
+                    <div
+                      key={file.path}
+                      style={{
+                        padding: '10px 20px',
+                        cursor: 'pointer',
+                        backgroundColor: file.path === activeFile ? '#1e1e1e' : 'transparent',
+                        color: 'white',
+                        borderRight: '1px solid #1e1e1e',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <span onClick={() => setActiveFile(file.path)}>
+                        {file.path.split('/').pop()}
+                        {file.modified && <span style={{ color: '#f39c12' }}> ●</span>}
+                      </span>
+                      <button
+                        onClick={() => handleCloseTab(file.path)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#999',
+                          cursor: 'pointer',
+                          fontSize: '16px'
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              <div style={{ height: openFiles.length > 0 ? 'calc(100% - 40px)' : '100%' }}>
+                {currentFile ? (
+                  <CodeEditor
+                    value={currentFile.content}
+                    onChange={handleEditorChange}
+                    language={currentFile.language}
+                  />
+                ) : (
+                  <div style={{
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#888',
+                    backgroundColor: '#1e1e1e',
+                    flexDirection: 'column',
+                    gap: '20px'
+                  }}>
+                    <p>Select a file to start editing</p>
+                    <button
+                      onClick={() => setShowNewFileModal(true)}
+                      style={{
+                        padding: '10px 20px',
+                        backgroundColor: '#3498db',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Create New File
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ height: '100%', backgroundColor: '#1e1e1e' }}>
+              <div style={{
+                height: '30px',
+                backgroundColor: '#2d2d2d',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 10px',
+                color: 'white',
+                fontSize: '14px',
+                borderBottom: '1px solid #1e1e1e'
+              }}>
+                Terminal
+                {execution && (
+                  <span style={{
+                    marginLeft: '10px',
+                    padding: '2px 8px',
+                    fontSize: '12px',
+                    backgroundColor: execution.status === 'RUNNING' ? '#f39c12' :
+                                   execution.status === 'SUCCESS' ? '#27ae60' :
+                                   execution.status === 'FAILED' ? '#e74c3c' : '#95a5a6',
+                    borderRadius: '4px'
+                  }}>
+                    {execution.status}
+                  </span>
+                )}
+              </div>
+              <div style={{ height: 'calc(100% - 30px)' }}>
+                <Terminal logs={logs} />
+              </div>
+            </div>
+          </Split>
+        </Split>
+      </div>
+
+      {showNewFileModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{ 
+            backgroundColor: 'white', 
+            padding: '30px', 
+            borderRadius: '8px', 
+            width: '400px' 
+          }}>
+            <h3>Create New File</h3>
+            <input
+              type="text"
+              placeholder="filename.js"
+              value={newFileName}
+              onChange={(e) => setNewFileName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleCreateFile()}
+              style={{
+                width: '100%',
+                padding: '10px',
+                marginTop: '15px',
+                marginBottom: '15px',
+                fontSize: '14px'
+              }}
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowNewFileModal(false);
+                  setNewFileName('');
+                }}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: '#95a5a6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateFile}
+                disabled={!newFileName.trim()}
+                style={{
+                  padding: '10px 20px',
+                  backgroundColor: newFileName.trim() ? '#27ae60' : '#95a5a6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: newFileName.trim() ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Create
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
-};
-
-export default EditorPage;
+}

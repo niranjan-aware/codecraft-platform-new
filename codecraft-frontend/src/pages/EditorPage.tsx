@@ -1,314 +1,223 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Project, FileNode } from '../../types';
 import Editor from '@monaco-editor/react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
-import {
-  Play,
-  Save,
-  FolderTree,
-  Terminal as TerminalIcon,
-  FileText,
-  ExternalLink,
-  StopCircle
-} from 'lucide-react';
-import Header from '../components/Header';
-import { projectService } from '../services/projectService';
-import { fileService } from '../services/fileService';
-import { executionService, ExecutionResponse } from '../services/executionService';
-import SockJS from 'sockjs-client';
-import { Client } from '@stomp/stompjs';
+import FileTree from '../../components/editor/FileTree';
+import Terminal from '../../components/editor/Terminal';
+import { Play, Square, ArrowLeft, Save, BarChart3 } from 'lucide-react';
+import { projectService } from '../../services/projectService';
+import { fileService } from '../../services/fileService';
+import { executionService } from '../../services/executionService';
 
 const EditorPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
-  const [project, setProject] = useState<any>(null);
-  const [files, setFiles] = useState<any[]>([]);
-  const [selectedFile, setSelectedFile] = useState<any>(null);
-  const [fileContent, setFileContent] = useState('');
-  const [saving, setSaving] = useState(false);
+  const navigate = useNavigate();
+  const [project, setProject] = useState<Project | null>(null);
+  const [fileTree, setFileTree] = useState<any>(null);
+  const [currentFile, setCurrentFile] = useState<string>('');
+  const [fileContent, setFileContent] = useState<string>('');
+  const [language, setLanguage] = useState<string>('javascript');
   const [running, setRunning] = useState(false);
-  const [currentExecution, setCurrentExecution] = useState<ExecutionResponse | null>(null);
-
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const stompClientRef = useRef<Client | null>(null);
+  const [logs, setLogs] = useState<Array<{ level: string; message: string; timestamp: string }>>([]);
+  const [executionId, setExecutionId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadProject();
-    loadFiles();
-    initializeTerminal();
-
-    return () => {
-      if (stompClientRef.current) {
-        stompClientRef.current.deactivate();
-      }
-      if (xtermRef.current) {
-        xtermRef.current.dispose();
-      }
-    };
+    if (projectId) {
+      loadProject();
+      loadFileTree();
+    }
   }, [projectId]);
 
   const loadProject = async () => {
     try {
-      const projectData = await projectService.getProject(projectId!);
-      setProject(projectData);
+      const data = await projectService.getProject(projectId!);
+      setProject(data);
+      setLanguage(data.language.toLowerCase());
     } catch (error) {
-      console.error('Failed to load project:', error);
+      console.error('Failed to load project', error);
     }
   };
 
-  const loadFiles = async () => {
+  const loadFileTree = async () => {
     try {
-      const filesData = await fileService.listFiles(projectId!);
-      setFiles(filesData);
-      if (filesData.length > 0 && !selectedFile) {
-        loadFile(filesData[0]);
-      }
+      const data = await fileService.getFileTree(projectId!);
+      setFileTree(data);
     } catch (error) {
-      console.error('Failed to load files:', error);
+      console.error('Failed to load file tree', error);
     }
   };
 
-  const loadFile = async (file: any) => {
+  const handleFileSelect = async (path: string) => {
     try {
-      setSelectedFile(file);
-      const content = await fileService.getFileContent(projectId!, file.path);
-      setFileContent(content.content);
+      const data = await fileService.getFileContent(projectId!, path);
+      setCurrentFile(path);
+      setFileContent(data.content || '');
+      
+      const ext = path.split('.').pop();
+      const langMap: { [key: string]: string } = {
+        js: 'javascript',
+        ts: 'typescript',
+        jsx: 'javascript',
+        tsx: 'typescript',
+        py: 'python',
+        java: 'java',
+        html: 'html',
+        css: 'css',
+        json: 'json',
+        md: 'markdown'
+      };
+      setLanguage(langMap[ext || ''] || 'javascript');
     } catch (error) {
-      console.error('Failed to load file:', error);
+      console.error('Failed to load file', error);
     }
   };
 
   const handleSave = async () => {
-    if (!selectedFile) return;
-
+    if (!currentFile) return;
     try {
-      setSaving(true);
-      await fileService.updateFile(projectId!, selectedFile.path, fileContent);
-      xtermRef.current?.writeln('\r\n\x1b[32m✓ File saved successfully\x1b[0m');
+      await fileService.updateFile(projectId!, currentFile, fileContent);
+      addLog('INFO', `✓ Saved ${currentFile}`);
     } catch (error) {
-      console.error('Failed to save file:', error);
-      xtermRef.current?.writeln('\r\n\x1b[31m✗ Failed to save file\x1b[0m');
-    } finally {
-      setSaving(false);
+      console.error('Failed to save file', error);
+      addLog('ERROR', `✗ Failed to save ${currentFile}`);
     }
   };
 
-  const handleRun = async () => {
-    try {
-      setRunning(true);
-      xtermRef.current?.clear();
-      xtermRef.current?.writeln('\x1b[36m🚀 Starting execution...\x1b[0m\r\n');
+  const addLog = (level: string, message: string) => {
+    setLogs(prev => [...prev, { level, message, timestamp: new Date().toISOString() }]);
+  };
 
+  const handleRun = async () => {
+    if (!project) return;
+    
+    setRunning(true);
+    setLogs([]);
+    addLog('INFO', `🚀 Starting execution (${project.language})...`);
+    
+    try {
       const execution = await executionService.startExecution({
         projectId: projectId!,
         language: project.language
       });
-
-      setCurrentExecution(execution);
-      connectToExecutionLogs(execution.id);
+      setExecutionId(execution.id);
+      addLog('INFO', `Execution ID: ${execution.id}`);
     } catch (error: any) {
-      console.error('Failed to start execution:', error);
-      xtermRef.current?.writeln('\r\n\x1b[31m✗ Failed to start execution\x1b[0m');
-      xtermRef.current?.writeln(`\x1b[31m${error.response?.data?.message || error.message}\x1b[0m`);
+      console.error('Failed to execute', error);
+      addLog('ERROR', `✗ Failed to start execution: ${error.response?.data?.message || error.message}`);
       setRunning(false);
     }
   };
 
   const handleStop = async () => {
-    if (!currentExecution) return;
-
-    if (!window.confirm('Are you sure you want to stop this execution?')) {
-      return;
-    }
-
+    if (!executionId) return;
     try {
-      await executionService.stopExecution(currentExecution.id);
-      xtermRef.current?.writeln('\r\n\x1b[33m⚠ Execution stopped by user\x1b[0m');
+      await executionService.stopExecution(executionId);
       setRunning(false);
-      setCurrentExecution(null);
+      addLog('INFO', '⏹ Execution stopped');
     } catch (error) {
-      console.error('Failed to stop execution:', error);
-      xtermRef.current?.writeln('\r\n\x1b[31m✗ Failed to stop execution\x1b[0m');
+      console.error('Failed to stop execution', error);
     }
   };
 
-  const connectToExecutionLogs = (executionId: string) => {
-    const socket = new SockJS('http://localhost:8080/api/executions/ws/execution');
-    const client = new Client({
-      webSocketFactory: () => socket as any,
-      reconnectDelay: 5000,
-      onConnect: () => {
-        console.log('WebSocket connected');
-        client.subscribe(`/topic/execution/${executionId}`, (message) => {
-          const log = JSON.parse(message.body);
-          const color = log.level === 'ERROR' ? '\x1b[31m' : '\x1b[37m';
-          xtermRef.current?.writeln(`${color}${log.message}\x1b[0m`);
-          
-          if (log.level === 'INFO' && log.message.includes('completed successfully')) {
-            setRunning(false);
-          } else if (log.level === 'ERROR' && log.message.includes('failed')) {
-            setRunning(false);
-          }
-        });
-      },
-      onStompError: (frame) => {
-        console.error('STOMP error:', frame);
-      }
-    });
-
-    client.activate();
-    stompClientRef.current = client;
-  };
-
-  const initializeTerminal = () => {
-    if (terminalRef.current && !xtermRef.current) {
-      const term = new Terminal({
-        cursorBlink: true,
-        fontSize: 14,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: {
-          background: '#1e1e1e',
-          foreground: '#d4d4d4'
-        }
-      });
-
-      const fitAddon = new FitAddon();
-      term.loadAddon(fitAddon);
-      term.open(terminalRef.current);
-      fitAddon.fit();
-
-      term.writeln('\x1b[36mCodeCraft Terminal Ready\x1b[0m');
-      term.writeln('Click "Run" to execute your code\r\n');
-
-      xtermRef.current = term;
-      fitAddonRef.current = fitAddon;
-
-      window.addEventListener('resize', () => fitAddon.fit());
+  const handleCreateFile = async () => {
+    const fileName = prompt('Enter file name (e.g., index.js):');
+    if (!fileName) return;
+    
+    try {
+      const ext = fileName.split('.').pop() || '';
+      const defaultContent: { [key: string]: string } = {
+        'js': '// TODO: Add JavaScript code\nconsole.log("Hello World");\n',
+        'ts': '// TODO: Add TypeScript code\nconsole.log("Hello World");\n',
+        'py': '# TODO: Add Python code\nprint("Hello World")\n',
+        'java': 'public class Main {\n  public static void main(String[] args) {\n    System.out.println("Hello World");\n  }\n}\n',
+        'html': '<!DOCTYPE html>\n<html>\n<head>\n  <title>Document</title>\n</head>\n<body>\n  <h1>Hello World</h1>\n</body>\n</html>\n',
+        'css': '/* Add your styles here */\nbody {\n  font-family: sans-serif;\n}\n',
+        'json': '{\n  "name": "project"\n}\n',
+        'md': '# Document\n\nHello World\n'
+      };
+      
+      const content = defaultContent[ext] || '// TODO: Add content\n';
+      
+      await fileService.createFile(projectId!, { path: fileName, content });
+      await loadFileTree();
+      addLog('INFO', `✓ Created ${fileName}`);
+    } catch (error) {
+      console.error('Failed to create file', error);
+      addLog('ERROR', '✗ Failed to create file');
     }
-  };
-
-  const getFileIcon = (fileName: string) => {
-    return <FileText className="w-4 h-4 text-gray-500" />;
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
-      <Header />
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <nav style={{ 
+        background: '#1e1e1e', 
+        color: 'white', 
+        padding: '0.75rem 1rem',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: '1px solid #333'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button onClick={() => navigate('/dashboard')} style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem' }}>
+            <ArrowLeft size={20} />
+            Back
+          </button>
+          <h2 style={{ margin: 0 }}>{project?.name || 'Loading...'}</h2>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={handleSave} disabled={!currentFile} style={{ padding: '0.5rem 1rem', background: currentFile ? '#4CAF50' : '#555', color: 'white', border: 'none', borderRadius: '4px', cursor: currentFile ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Save size={18} />
+            Save
+          </button>
+          <button onClick={() => navigate(`/analysis/${projectId}`)} style={{ padding: '0.5rem 1rem', background: '#9C27B0', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <BarChart3 size={18} />
+            Analysis
+          </button>
+          {running ? (
+            <button onClick={handleStop} style={{ padding: '0.5rem 1rem', background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Square size={18} />
+              Stop
+            </button>
+          ) : (
+            <button onClick={handleRun} style={{ padding: '0.5rem 1rem', background: '#2196F3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Play size={18} />
+              Run
+            </button>
+          )}
+        </div>
+      </nav>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* File Tree */}
-        <div className="w-64 bg-white border-r border-gray-200 overflow-y-auto">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <FolderTree className="w-4 h-4" />
-              <span>{project?.name || 'Project'}</span>
-            </div>
-            {project?.projectType && (
-              <div className="mt-2">
-                <span className={`inline-block px-2 py-1 text-xs rounded ${
-                  project.projectType === 'SERVER' 
-                    ? 'bg-green-100 text-green-800' 
-                    : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {project.projectType}
-                </span>
-              </div>
-            )}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ width: '250px', background: '#252526', borderRight: '1px solid #333', overflow: 'auto' }}>
+          <div style={{ padding: '0.5rem', borderBottom: '1px solid #333' }}>
+            <button onClick={handleCreateFile} style={{ width: '100%', padding: '0.5rem', background: '#007acc', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+              + New File
+            </button>
           </div>
-          <div className="p-2">
-            {files.map((file) => (
-              <button
-                key={file.id}
-                onClick={() => loadFile(file)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
-                  selectedFile?.id === file.id
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                {getFileIcon(file.path)}
-                <span className="truncate">{file.path}</span>
-              </button>
-            ))}
-          </div>
+          <FileTree files={fileTree} onFileSelect={handleFileSelect} />
         </div>
 
-        {/* Editor and Terminal */}
-        <div className="flex-1 flex flex-col">
-          {/* Toolbar */}
-          <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSave}
-                disabled={saving || !selectedFile}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                {saving ? 'Saving...' : 'Save'}
-              </button>
-
-              {currentExecution?.status === 'RUNNING' ? (
-                <button
-                  onClick={handleStop}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
-                >
-                  <StopCircle className="w-4 h-4" />
-                  Stop
-                </button>
-              ) : (
-                <button
-                  onClick={handleRun}
-                  disabled={running}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-                >
-                  <Play className="w-4 h-4" />
-                  {running ? 'Running...' : 'Run'}
-                </button>
-              )}
-            </div>
-
-            {currentExecution?.publicUrl && (
-              <a href={currentExecution.publicUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Open App
-              </a>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {currentFile ? (
+              <Editor
+                height="100%"
+                language={language}
+                value={fileContent}
+                onChange={(value) => setFileContent(value || '')}
+                theme="vs-dark"
+                options={{ minimap: { enabled: false }, fontSize: 14, lineNumbers: 'on', wordWrap: 'on', automaticLayout: true }}
+              />
+            ) : (
+              <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', background: '#1e1e1e' }}>
+                Select a file to edit
+              </div>
             )}
           </div>
 
-          {/* Editor */}
-          <div className="flex-1 bg-[#1e1e1e]">
-            <Editor
-              height="100%"
-              language="javascript"
-              theme="vs-dark"
-              value={fileContent}
-              onChange={(value) => setFileContent(value || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 14,
-                lineNumbers: 'on',
-                scrollBeyondLastLine: false,
-                automaticLayout: true
-              }}
-            />
-          </div>
-
-          {/* Terminal */}
-          <div className="h-64 bg-[#1e1e1e] border-t border-gray-700">
-            <div className="h-8 bg-[#2d2d2d] border-b border-gray-700 px-4 flex items-center">
-              <div className="flex items-center gap-2 text-sm text-gray-400">
-                <TerminalIcon className="w-4 h-4" />
-                <span>Terminal</span>
-              </div>
-            </div>
-            <div ref={terminalRef} className="h-[calc(100%-2rem)]" />
+          <div style={{ height: '200px', borderTop: '1px solid #333' }}>
+            <Terminal logs={logs} />
           </div>
         </div>
       </div>

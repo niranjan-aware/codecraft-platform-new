@@ -25,26 +25,26 @@ export interface ProjectResponse {
 
 export const projectService = {
   async createProject(request: CreateProjectRequest): Promise<ProjectResponse> {
-    const response = await api.post('/project-service/projects', request);
+    const response = await api.post('/projects', request);
     return response.data;
   },
 
   async getProject(projectId: string): Promise<ProjectResponse> {
-    const response = await api.get(`/project-service/projects/${projectId}`);
+    const response = await api.get(`/projects/${projectId}`);
     return response.data;
   },
 
   async listProjects(): Promise<ProjectResponse[]> {
-    const response = await api.get('/project-service/projects');
+    const response = await api.get('/projects');
     return response.data;
   },
 
   async updateProject(projectId: string, request: CreateProjectRequest): Promise<ProjectResponse> {
-    const response = await api.put(`/project-service/projects/${projectId}`, request);
+    const response = await api.put(`/projects/${projectId}`, request);
     return response.data;
   },
 
   async deleteProject(projectId: string): Promise<void> {
-    await api.delete(`/project-service/projects/${projectId}`);
+    await api.delete(`/projects/${projectId}`);
   }
 };

@@ -3,6 +3,7 @@ package com.codecraft.project.service;
 import com.codecraft.project.dto.CreateProjectRequest;
 import com.codecraft.project.dto.ProjectResponse;
 import com.codecraft.project.entity.Project;
+import com.codecraft.project.entity.ProjectFile;
 import com.codecraft.project.repository.ProjectRepository;
 import com.codecraft.project.repository.ProjectFileRepository;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +31,6 @@ public class ProjectService {
         project.setLanguage(request.getLanguage());
         project.setFramework(request.getFramework());
         project.setVisibility(request.getVisibility());
-        project.setProjectType(request.getProjectType());
 
         project = projectRepository.save(project);
 
@@ -68,7 +68,6 @@ public class ProjectService {
         project.setName(request.getName());
         project.setDescription(request.getDescription());
         project.setVisibility(request.getVisibility());
-        project.setProjectType(request.getProjectType());
 
         project = projectRepository.save(project);
 
@@ -91,7 +90,15 @@ public class ProjectService {
 
     private void initializeProjectFiles(Project project) {
         String template = getTemplateContent(project.getLanguage(), project.getFramework());
-        storageService.uploadFile(project.getId(), "README.md", template);
+        String minioKey = storageService.uploadFile(project.getId(), "README.md", template);
+        
+        ProjectFile readmeFile = new ProjectFile();
+        readmeFile.setProjectId(project.getId());
+        readmeFile.setPath("README.md");
+        readmeFile.setMinioKey(minioKey);
+        readmeFile.setSizeBytes((long) template.getBytes().length);
+        readmeFile.setMimeType("text/markdown");
+        fileRepository.save(readmeFile);
     }
 
     private String getTemplateContent(Project.Language language, Project.Framework framework) {

@@ -1,31 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { projectAPI, fileAPI } from '../../services/api';
+import { useDispatch, useSelector } from 'react-redux';
+import { projectAPI } from '../../services/api';
+import { setProjects } from '../../store/projectSlice';
+import { logout } from '../../store/authSlice';
+import { RootState } from '../../store';
 import { Project } from '../../types';
-import { Plus, FolderOpen, Calendar, Code, Bell } from 'lucide-react';
-import { projectTemplates, getTemplate } from '../../templates';
 
-const DashboardPage: React.FC = () => {
+export default function DashboardPage() {
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newProject, setNewProject] = useState({
-    name: '',
-    description: '',
-    language: 'NODEJS',
-    template: ''
-  });
-
-  // Map frontend language to backend enum
-  const languageMap: { [key: string]: string } = {
-    'javascript': 'NODEJS',
-    'typescript': 'NODEJS', 
-    'python': 'PYTHON',
-    'java': 'JAVA',
-    'html': 'HTML_CSS_JS'
-  };
+  const dispatch = useDispatch();
+  const projects = useSelector((state: RootState) => state.project.projects);
+  const user = useSelector((state: RootState) => state.auth.user);
+  const [showModal, setShowModal] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [language, setLanguage] = useState('NODEJS');
 
   useEffect(() => {
     loadProjects();
@@ -34,338 +23,123 @@ const DashboardPage: React.FC = () => {
   const loadProjects = async () => {
     try {
       const response = await projectAPI.list();
-      setProjects(response.data);
+      dispatch(setProjects(response.data));
     } catch (error) {
       console.error('Failed to load projects', error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleCreateProject = async () => {
-    if (!newProject.name) return;
-    
-    setCreating(true);
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
     try {
-      const projectData = {
-        name: newProject.name,
-        description: newProject.description,
-        language: newProject.language
-      };
+      const response = await projectAPI.create({
+        name: projectName,
+        description: '',
+        language,
+        visibility: 'PRIVATE'
+      });
       
-      const response = await projectAPI.create(projectData);
-      const projectId = response.data.id;
+      setShowModal(false);
+      setProjectName('');
+      loadProjects();
       
-      if (newProject.template) {
-        const template = getTemplate(newProject.template);
-        if (template && template.files) {
-          for (const file of template.files) {
-            try {
-              await fileAPI.create(projectId, {
-                path: file.path,
-                content: file.content || '// TODO: Add content'
-              });
-              await new Promise(resolve => setTimeout(resolve, 200));
-            } catch (err) {
-              console.error(`Failed to create file ${file.path}`, err);
-            }
-          }
-        }
-      }
-      
-      navigate(`/editor/${projectId}`);
-    } catch (error: any) {
+      // Navigate to editor
+      navigate(`/editor/${response.data.id}`);
+    } catch (error) {
       console.error('Failed to create project', error);
-      alert(error.response?.data?.message || 'Failed to create project');
-    } finally {
-      setCreating(false);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    dispatch(logout());
     navigate('/login');
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f5f5f5' }}>
-      <nav style={{ 
-        background: 'white', 
-        padding: '1rem 2rem', 
-        borderBottom: '1px solid #e0e0e0',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center'
-      }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#2196F3' }}>
-          <Code size={24} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
-          CodeCraft
-        </h1>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button
-            onClick={handleLogout}
-            style={{
-              padding: '0.5rem 1rem',
-              background: '#f44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer'
-            }}
-          >
-            Logout
-          </button>
+    <div style={{ padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
+        <h1>CodeCraft Dashboard</h1>
+        <div>
+          <span style={{ marginRight: '20px' }}>Welcome, {user?.fullName}</span>
+          <button onClick={handleLogout}>Logout</button>
         </div>
-      </nav>
-
-      <div style={{ padding: '2rem' }}>
-        <div style={{ 
-          display: 'flex', 
-          justifyContent: 'space-between', 
-          alignItems: 'center', 
-          marginBottom: '2rem' 
-        }}>
-          <h2>My Projects</h2>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: '#2196F3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '1rem',
-              fontWeight: 500
-            }}
-          >
-            <Plus size={20} />
-            New Project
-          </button>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '3rem' }}>
-            <div style={{ 
-              border: '4px solid #f3f3f3',
-              borderTop: '4px solid #2196F3',
-              borderRadius: '50%',
-              width: '40px',
-              height: '40px',
-              animation: 'spin 1s linear infinite',
-              margin: '0 auto'
-            }} />
-          </div>
-        ) : projects.length === 0 ? (
-          <div style={{ 
-            textAlign: 'center', 
-            padding: '3rem',
-            background: 'white',
-            borderRadius: '8px',
-            border: '2px dashed #ccc'
-          }}>
-            <FolderOpen size={64} color="#999" style={{ marginBottom: '1rem' }} />
-            <p style={{ color: '#666', fontSize: '1.1rem' }}>No projects yet. Create your first project!</p>
-          </div>
-        ) : (
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', 
-            gap: '1.5rem' 
-          }}>
-            {projects.map(project => (
-              <div
-                key={project.id}
-                onClick={() => navigate(`/editor/${project.id}`)}
-                style={{
-                  background: 'white',
-                  padding: '1.5rem',
-                  borderRadius: '8px',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.15)';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                  <Code size={20} color="#2196F3" />
-                  <h3 style={{ margin: 0 }}>{project.name}</h3>
-                </div>
-                <p style={{ color: '#666', margin: '0.5rem 0' }}>{project.description}</p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1rem', fontSize: '0.9rem', color: '#999' }}>
-                  <span style={{ 
-                    padding: '0.25rem 0.5rem', 
-                    background: '#e3f2fd', 
-                    borderRadius: '4px',
-                    color: '#1976d2',
-                    fontWeight: 500
-                  }}>
-                    {project.language}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    <Calendar size={14} />
-                    {new Date(project.createdAt).toLocaleDateString()}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
-      {showCreateModal && (
+      <button onClick={() => setShowModal(true)} style={{ marginBottom: '20px', padding: '10px 20px' }}>
+        Create New Project
+      </button>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+        {projects.map((project: Project) => (
+          <div
+            key={project.id}
+            onClick={() => navigate(`/editor/${project.id}`)}
+            style={{
+              border: '1px solid #ccc',
+              padding: '20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              transition: 'box-shadow 0.2s',
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 8px rgba(0,0,0,0.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+          >
+            <h3>{project.name}</h3>
+            <p>Language: {project.language}</p>
+            <p style={{ fontSize: '12px', color: '#666' }}>
+              Created: {new Date(project.createdAt).toLocaleDateString()}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {showModal && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
+          backgroundColor: 'rgba(0,0,0,0.5)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
+          justifyContent: 'center'
         }}>
-          <div style={{
-            background: 'white',
-            padding: '2rem',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
-            overflow: 'auto'
-          }}>
-            <h2 style={{ marginTop: 0 }}>Create New Project</h2>
-            
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                Project Name *
-              </label>
-              <input
-                type="text"
-                value={newProject.name}
-                onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                placeholder="My Awesome Project"
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                Description
-              </label>
-              <textarea
-                value={newProject.description}
-                onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
-                placeholder="What does this project do?"
-                rows={3}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem',
-                  resize: 'vertical'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-                Template
-              </label>
-              <select
-                value={newProject.template}
-                onChange={(e) => {
-                  const template = projectTemplates.find(t => t.id === e.target.value);
-                  const templateLanguage = template?.language || 'javascript';
-                  setNewProject({ 
-                    ...newProject, 
-                    template: e.target.value,
-                    language: languageMap[templateLanguage] || 'NODEJS'
-                  });
-                }}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  fontSize: '1rem'
-                }}
-              >
-                <option value="">Blank Project</option>
-                {projectTemplates.map(template => (
-                  <option key={template.id} value={template.id}>
-                    {template.name} - {template.description}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
-              <button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setNewProject({ name: '', description: '', language: 'NODEJS', template: '' });
-                }}
-                disabled={creating}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#fff',
-                  color: '#666',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: creating ? 'not-allowed' : 'pointer',
-                  fontSize: '1rem'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateProject}
-                disabled={!newProject.name || creating}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: (!newProject.name || creating) ? '#ccc' : '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: (!newProject.name || creating) ? 'not-allowed' : 'pointer',
-                  fontSize: '1rem'
-                }}
-              >
-                {creating ? 'Creating...' : 'Create Project'}
-              </button>
-            </div>
+          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '8px', width: '400px' }}>
+            <h2>Create New Project</h2>
+            <form onSubmit={handleCreateProject}>
+              <div style={{ marginBottom: '15px' }}>
+                <input
+                  type="text"
+                  placeholder="Project Name"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  required
+                  style={{ width: '100%', padding: '10px' }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <select
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  style={{ width: '100%', padding: '10px' }}
+                >
+                  <option value="NODEJS">Node.js</option>
+                  <option value="PYTHON">Python</option>
+                  <option value="JAVA">Java</option>
+                  <option value="HTML_CSS_JS">HTML/CSS/JS</option>
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button type="submit" style={{ flex: 1, padding: '10px' }}>Create</button>
+                <button type="button" onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px' }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   );
-};
-
-export default DashboardPage;
+}
